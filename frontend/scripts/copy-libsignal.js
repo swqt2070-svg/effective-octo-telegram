@@ -1,15 +1,18 @@
-import fs from 'fs'
 import path from 'path'
+import { build } from 'esbuild'
 
-const src = path.resolve('node_modules/libsignal-protocol/dist/libsignal-protocol.js')
-const destDir = path.resolve('public')
-const dest = path.join(destDir, 'libsignal-protocol.js')
+const entry = path.resolve('node_modules/libsignal-protocol/dist/libsignal-protocol.js')
+const outFile = path.resolve('public/libsignal-protocol.js')
 
-if (!fs.existsSync(src)) {
-  console.error('libsignal-protocol not found at', src)
-  process.exit(1)
-}
+await build({
+  entryPoints: [entry],
+  bundle: true,
+  format: 'iife',
+  platform: 'browser',
+  outfile: outFile,
+  define: {
+    global: 'window',
+  },
+})
 
-fs.mkdirSync(destDir, { recursive: true })
-fs.copyFileSync(src, dest)
-console.log('Copied libsignal-protocol.js to public/')
+console.log('Bundled libsignal-protocol.js to public/')
