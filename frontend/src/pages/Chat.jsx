@@ -90,7 +90,7 @@ export default function Chat() {
             await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
             await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
           }catch(ex){
-            console.error('decrypt failed', ex, env)
+            console.error('decrypt failed', ex, { id: env.id, len: env.ciphertext?.length, sample: String(env.ciphertext || '').slice(0, 80) })
             const errText = ex?.message ? ex.message : String(ex)
             await appendMessage(deviceId, peerId, { t:'sys', text:`[decrypt failed] ${errText}`, ts: now(), _ts: now() })
             await upsertChat(deviceId, { peerId, title: peerId, lastText: '[decrypt failed]', lastTs: now() })
@@ -133,7 +133,7 @@ export default function Chat() {
                   await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
                   await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
                 }catch(ex){
-                  console.error('decrypt failed', ex, env)
+                  console.error('decrypt failed', ex, { id: env.id, len: env.ciphertext?.length, sample: String(env.ciphertext || '').slice(0, 80) })
                   const errText = ex?.message ? ex.message : String(ex)
                   await appendMessage(deviceId, peerId, { t:'sys', text:`[decrypt failed] ${errText}`, ts: now(), _ts: now() })
                   await upsertChat(deviceId, { peerId, title: peerId, lastText: '[decrypt failed]', lastTs: now() })
@@ -201,6 +201,7 @@ export default function Chat() {
         await buildSessionFromBundle(lsStore, addr, b.bundle)
         const enc = await encryptToAddress(lsStore, addr, { t:'msg', text, ts, from: me.id, fromUsername: me.username })
         const packed = btoa(JSON.stringify({ type: enc.type, bodyB64: enc.bodyB64 }))
+        console.log('send packed', { len: packed.length, sample: packed.slice(0, 80) })
         envelopes.push({ recipientDeviceId: d.id, ciphertext: packed })
       }
       await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: peerId, envelopes }, token)
