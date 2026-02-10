@@ -74,6 +74,10 @@ export async function generateSignedPreKey(store, id=1) {
 // Signal store adapter for libsignal
 export function makeLibSignalStore(store) {
   return {
+    Direction: {
+      SENDING: 1,
+      RECEIVING: 2,
+    },
     getIdentityKeyPair: async () => store.get('identityKey'),
     getLocalRegistrationId: async () => store.get('registrationId'),
     put: async (key, value) => store.put(key, value),
