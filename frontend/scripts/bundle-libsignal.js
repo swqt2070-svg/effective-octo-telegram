@@ -25,6 +25,7 @@ try {
         },
       },
     ],
+    external: ['crypto'],
   })
   console.log('Bundled libsignal-protocol.js to public/')
 } catch (err) {
