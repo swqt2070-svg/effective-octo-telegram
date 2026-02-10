@@ -5,6 +5,34 @@ if (!libsignal) {
   throw new Error('libsignal not loaded. Ensure /libsignal-protocol.js is loaded before the app.')
 }
 
+// libsignal expects storage.Direction.*; harden for browser bundles that omit it
+const Direction = { SENDING: 1, RECEIVING: 2 }
+function ensureDirection(storage) {
+  if (storage && !storage.Direction) storage.Direction = Direction
+}
+
+if (libsignal.SessionBuilder && !libsignal.SessionBuilder.__patched) {
+  const Original = libsignal.SessionBuilder
+  const Wrapped = function(storage, remoteAddress) {
+    ensureDirection(storage)
+    return new Original(storage, remoteAddress)
+  }
+  Wrapped.prototype = Original.prototype
+  Wrapped.__patched = true
+  libsignal.SessionBuilder = Wrapped
+}
+
+if (libsignal.SessionCipher && !libsignal.SessionCipher.__patched) {
+  const Original = libsignal.SessionCipher
+  const Wrapped = function(storage, remoteAddress) {
+    ensureDirection(storage)
+    return new Original(storage, remoteAddress)
+  }
+  Wrapped.prototype = Original.prototype
+  Wrapped.__patched = true
+  libsignal.SessionCipher = Wrapped
+}
+
 // Utilities
 function b64FromArrayBuffer(buf) {
   const bytes = new Uint8Array(buf)
@@ -85,10 +113,7 @@ export async function generateSignedPreKey(store, id=1) {
 // Signal store adapter for libsignal
 export function makeLibSignalStore(store) {
   return {
-    Direction: {
-      SENDING: 1,
-      RECEIVING: 2,
-    },
+    Direction,
     getIdentityKeyPair: async () => store.get('identityKey'),
     getLocalRegistrationId: async () => store.get('registrationId'),
     put: async (key, value) => store.put(key, value),
