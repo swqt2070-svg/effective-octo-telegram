@@ -15,6 +15,16 @@ try {
     define: {
       global: 'window',
     },
+    plugins: [
+      {
+        name: 'alias-mocha-bytebuffer',
+        setup(build) {
+          build.onResolve({ filter: /^mocha-bytebuffer$/ }, () => ({
+            path: 'bytebuffer',
+          }))
+        },
+      },
+    ],
   })
   console.log('Bundled libsignal-protocol.js to public/')
 } catch (err) {
