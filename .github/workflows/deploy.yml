@@ -21,11 +21,8 @@ jobs:
 
       - name: Rsync to server
         run: |
-          rsync -avz --delete --exclude='.git*' --exclude='node_modules' --exclude='.env' --exclude='*.log' \
-            -e "ssh -p ${{ secrets.DEPLOY_PORT }}" ./ \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/signal-web-local/
+          rsync -avz --delete --exclude='.git*' --exclude='node_modules' --exclude='.env' --exclude='*.log' -e "ssh -p ${{ secrets.DEPLOY_PORT }}" ./ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/signal-web-local/
 
       - name: Build and restart
         run: |
-          ssh -p ${{ secrets.DEPLOY_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-            "cd /opt/signal-web-local && docker-compose -f docker-compose.prod.yml up -d --build"
+          ssh -p ${{ secrets.DEPLOY_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "cd /opt/signal-web-local && docker-compose -f docker-compose.prod.yml up -d --build"
