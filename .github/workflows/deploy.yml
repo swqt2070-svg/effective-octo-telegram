@@ -14,21 +14,21 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
 
+      - name: Set deploy vars
+        run: |
+          echo "DEPLOY_HOST=$(printf "%s" "${{ secrets.DEPLOY_HOST }}" | tr -d '\r\n')" >> $GITHUB_ENV
+          echo "DEPLOY_USER=$(printf "%s" "${{ secrets.DEPLOY_USER }}" | tr -d '\r\n')" >> $GITHUB_ENV
+          echo "DEPLOY_PORT=$(printf "%s" "${{ secrets.DEPLOY_PORT }}" | tr -d '\r\n')" >> $GITHUB_ENV
+
       - name: Add known hosts
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
       - name: Rsync to server
         run: |
-          HOST=$(printf "%s" "${{ secrets.DEPLOY_HOST }}" | tr -d '\r\n')
-          USER=$(printf "%s" "${{ secrets.DEPLOY_USER }}" | tr -d '\r\n')
-          PORT=$(printf "%s" "${{ secrets.DEPLOY_PORT }}" | tr -d '\r\n')
-          rsync -avz --delete --exclude='.git*' --exclude='node_modules' --exclude='.env' --exclude='*.log' -e "ssh -p $PORT" ./ "$USER@$HOST:/opt/signal-web-local/"
+          rsync -avz --delete --exclude='.git*' --exclude='node_modules' --exclude='.env' --exclude='*.log' -e "ssh -p $DEPLOY_PORT" ./ "$DEPLOY_USER@$DEPLOY_HOST:/opt/signal-web-local/"
 
       - name: Build and restart
         run: |
-          HOST=$(printf "%s" "${{ secrets.DEPLOY_HOST }}" | tr -d '\r\n')
-          USER=$(printf "%s" "${{ secrets.DEPLOY_USER }}" | tr -d '\r\n')
-          PORT=$(printf "%s" "${{ secrets.DEPLOY_PORT }}" | tr -d '\r\n')
-          ssh -p "$PORT" "$USER@$HOST" "cd /opt/signal-web-local && docker-compose -f docker-compose.prod.yml up -d --build"
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "cd /opt/signal-web-local && docker-compose -f docker-compose.prod.yml up -d --build"
