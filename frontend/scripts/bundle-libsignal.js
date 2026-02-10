@@ -19,8 +19,8 @@ try {
       {
         name: 'alias-mocha-bytebuffer',
         setup(build) {
-          build.onResolve({ filter: /^mocha-bytebuffer$/ }, () => ({
-            path: 'bytebuffer',
+          build.onResolve({ filter: /^mocha-bytebuffer$/ }, (args) => ({
+            path: require.resolve('bytebuffer'),
           }))
         },
       },
