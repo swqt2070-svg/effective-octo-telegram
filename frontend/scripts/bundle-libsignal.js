@@ -1,5 +1,6 @@
 import { build } from 'esbuild'
 import path from 'path'
+import fs from 'fs'
 import { createRequire } from 'module'
 
 const entry = path.resolve('node_modules/libsignal-protocol/dist/libsignal-protocol.js')
@@ -17,6 +18,7 @@ try {
     define: {
       global: 'window',
     },
+    inject: [path.resolve('scripts/shim-buffer.js')],
     plugins: [
       {
         name: 'alias-mocha-bytebuffer',
@@ -27,8 +29,16 @@ try {
         },
       },
     ],
-    external: ['crypto', 'path', 'fs', 'os', 'stream', 'buffer', 'util'],
+    external: ['crypto', 'path', 'fs', 'os', 'stream', 'util'],
   })
+  const contents = fs.readFileSync(outFile, 'utf8')
+  const patched = contents
+    .replace(/\}\)\(this,/g, '})(window,')
+    .replace(/\}\)\(this\)/g, '})(window)')
+  if (patched !== contents) {
+    fs.writeFileSync(outFile, patched)
+    console.log('Patched libsignal-protocol.js global this -> window')
+  }
   console.log('Bundled libsignal-protocol.js to public/')
 } catch (err) {
   console.error('Failed to bundle libsignal-protocol.js')
