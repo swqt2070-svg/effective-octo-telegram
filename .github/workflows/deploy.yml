@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Rsync to server
-        uses: burnett01/rsync-deployments@v5.2
+        uses: burnett01/rsync-deployments@7.1.0
         with:
           switches: -avz --delete --exclude='.git*' --exclude='node_modules' --exclude='.env' --exclude='*.log'
           path: ./
