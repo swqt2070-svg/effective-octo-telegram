@@ -1,0 +1,42 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:15
+    container_name: local-signal-db
+    environment:
+      POSTGRES_USER: localsignal
+      POSTGRES_PASSWORD: localsignal
+      POSTGRES_DB: localsignal
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql://localsignal:localsignal@db:5432/localsignal?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3001
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      QR_TTL_SECONDS: 180
+      INVITE_DEFAULT_TTL_HOURS: 168
+    depends_on:
+      - db
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    restart: unless-stopped
+
+volumes:
+  db_data:

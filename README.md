@@ -64,3 +64,11 @@ Backend:
 Frontend:
 - `npm run dev` - dev server
 - `npm run build` - production build
+
+## Production (Docker)
+Create a `.env` file in the repo root based on `deploy.env.example`, then run:
+```bash
+docker-compose -f docker-compose.prod.yml up -d --build
+```
+
+Frontend will be on port 80, backend on port 3001.
