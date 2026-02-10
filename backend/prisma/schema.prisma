@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  FROZEN
+  BLOCKED
+}
+
+model User {
+  id           String        @id @default(cuid())
+  username     String        @unique
+  displayName  String?
+  passwordHash String
+  role         UserRole      @default(USER)
+  status       AccountStatus @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+  devices      Device[]
+}
+
+model Device {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  createdAt       DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+
+  // Signal-related public materials
+  registrationId  Int?
+  identityKeyPub  String?  // base64
+  signedPreKeyId  Int?
+  signedPreKeyPub String?  // base64
+  signedPreKeySig String?  // base64
+
+  user            User     @relation(fields: [userId], references: [id])
+  oneTimePreKeys  OneTimePreKey[]
+  incoming        MessageEnvelope[] @relation("incoming")
+  outgoing        MessageEnvelope[] @relation("outgoing")
+}
+
+model OneTimePreKey {
+  id        String   @id @default(cuid())
+  deviceId  String
+  keyId     Int
+  pubKey    String   // base64
+  createdAt DateTime @default(now())
+  usedAt    DateTime?
+
+  device    Device   @relation(fields: [deviceId], references: [id])
+
+  @@unique([deviceId, keyId])
+}
+
+model MessageEnvelope {
+  id                 String   @id @default(cuid())
+  senderUserId       String
+  senderDeviceId     String
+  recipientUserId    String
+  recipientDeviceId  String
+  ciphertext         String   // base64
+  createdAt          DateTime @default(now())
+  deliveredAt        DateTime?
+
+  senderDevice       Device   @relation("outgoing", fields: [senderDeviceId], references: [id])
+  recipientDevice    Device   @relation("incoming", fields: [recipientDeviceId], references: [id])
+
+  @@index([recipientDeviceId, deliveredAt, createdAt])
+}
+
+model InviteCode {
+  code       String   @id
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  maxUses    Int
+  uses       Int      @default(0)
+}
+
+enum QrStatus {
+  PENDING
+  APPROVED
+  EXPIRED
+}
+
+model QrLogin {
+  token            String   @id
+  status           QrStatus @default(PENDING)
+  createdAt        DateTime @default(now())
+  expiresAt        DateTime
+  approvedByUserId String?
+  issuedJwt        String?
+}
