@@ -1,0 +1,17 @@
+{
+  email {$CADDY_EMAIL}
+}
+
+{$DOMAIN} {
+  @backend {
+    path /auth* /users* /devices* /messages* /admin* /keys* /me /ws*
+  }
+
+  handle @backend {
+    reverse_proxy backend:3001
+  }
+
+  handle {
+    reverse_proxy frontend:80
+  }
+}

@@ -71,4 +71,4 @@ Create a `.env` file in the repo root based on `deploy.env.example`, then run:
 docker-compose -f docker-compose.prod.yml up -d --build
 ```
 
-Frontend will be on port 80, backend on port 3001.
+Frontend will be on port 80/443 via Caddy. Backend is proxied through the same domain.

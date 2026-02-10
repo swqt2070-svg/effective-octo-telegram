@@ -23,8 +23,6 @@ services:
       INVITE_DEFAULT_TTL_HOURS: 168
     depends_on:
       - db
-    ports:
-      - "3001:3001"
     restart: unless-stopped
 
   frontend:
@@ -34,9 +32,26 @@ services:
         VITE_API_URL: ${VITE_API_URL}
     depends_on:
       - backend
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    depends_on:
+      - frontend
+      - backend
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      CADDY_EMAIL: ${CADDY_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
     restart: unless-stopped
 
 volumes:
   db_data:
+  caddy_data:
+  caddy_config:
