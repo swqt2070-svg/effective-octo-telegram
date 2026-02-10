@@ -9,22 +9,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rsync to server
-        uses: burnett01/rsync-deployments@7.1.0
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          switches: -avz --delete --exclude='.git*' --exclude='node_modules' --exclude='.env' --exclude='*.log'
-          path: ./
-          remote_path: /opt/signal-web-local
-          remote_host: ${{ secrets.DEPLOY_HOST }}
-          remote_user: ${{ secrets.DEPLOY_USER }}
-          remote_port: ${{ secrets.DEPLOY_PORT }}
-          remote_key: ${{ secrets.DEPLOY_KEY }}
+          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Add known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Rsync to server
+        run: |
+          rsync -avz --delete --exclude='.git*' --exclude='node_modules' --exclude='.env' --exclude='*.log' \
+            -e "ssh -p ${{ secrets.DEPLOY_PORT }}" ./ \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/signal-web-local/
 
       - name: Build and restart
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          script: cd /opt/signal-web-local && docker-compose -f docker-compose.prod.yml up -d --build
+        run: |
+          ssh -p ${{ secrets.DEPLOY_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "cd /opt/signal-web-local && docker-compose -f docker-compose.prod.yml up -d --build"
