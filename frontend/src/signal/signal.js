@@ -1,4 +1,4 @@
-import 'libsignal-protocol'
+import './libsignal-shim.js'
 const libsignal = window.libsignal
 if (!libsignal) {
   throw new Error('libsignal not loaded.')
