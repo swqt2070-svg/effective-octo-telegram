@@ -22,16 +22,17 @@ function arrayBufferFromB64(b64) {
 export function makeAddress(userId, deviceId) {
   // libsignal expects (name, deviceIdNumber). We'll hash deviceId to int deterministically.
   const num = Math.abs(hashToInt(deviceId)) % 16384 + 1
-  const Addr = libsignal.SignalProtocolAddress
-  if (typeof Addr !== 'function') {
-    throw new Error('SignalProtocolAddress missing or invalid')
-  }
-  try {
-    return new Addr(userId, num)
-  } catch {
-    const addr = {}
-    Addr.call(addr, userId, num)
-    return addr
+  // Avoid relying on libsignal's constructor (some builds expose it non-constructable)
+  return {
+    getName: () => userId,
+    getDeviceId: () => num,
+    toString: () => `${userId}.${num}`,
+    equals: (other) => {
+      if (!other) return false
+      const on = typeof other.getName === 'function' ? other.getName() : other.name
+      const od = typeof other.getDeviceId === 'function' ? other.getDeviceId() : other.deviceId
+      return on === userId && od === num
+    },
   }
 }
 
