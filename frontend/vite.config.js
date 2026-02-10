@@ -7,6 +7,9 @@ export default defineConfig({
   define: {
     global: 'window',
   },
+  build: {
+    target: 'es2022',
+  },
   resolve: {
     alias: {
       'libsignal-protocol': 'libsignal-protocol/dist/libsignal-protocol.js',

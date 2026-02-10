@@ -1,9 +1,14 @@
-import './libsignal-shim.js'
+import Long from 'long'
+import { SignalStore } from './store.js'
+
+if (!window.dcodeIO) window.dcodeIO = {}
+window.dcodeIO.Long = Long
+
+await import('libsignal-protocol')
 const libsignal = window.libsignal
 if (!libsignal) {
   throw new Error('libsignal not loaded.')
 }
-import { SignalStore } from './store.js'
 
 // Utilities
 function b64FromArrayBuffer(buf) {
