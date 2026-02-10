@@ -18,9 +18,6 @@ try {
     define: {
       global: 'window',
     },
-    banner: {
-      js: 'var require = undefined; var module = undefined; var exports = undefined; var define = undefined;',
-    },
     plugins: [
       {
         name: 'alias-mocha-bytebuffer',
@@ -31,15 +28,26 @@ try {
         },
       },
     ],
+    external: ['fs', 'path', 'crypto'],
   })
 
   const contents = fs.readFileSync(outFile, 'utf8')
-  const patched = contents
+  let patched = contents
     .replace(/\}\)\(this,/g, '})(window,')
     .replace(/\}\)\(this\)/g, '})(window)')
+
+  const guard = 'var require = undefined; var module = undefined; var exports = undefined; var define = undefined;'
+  const needle = ';(function(){'
+  const idx = patched.indexOf(needle)
+  if (idx !== -1) {
+    patched = patched.slice(0, idx) + guard + '\n' + patched.slice(idx)
+  } else {
+    patched = guard + '\n' + patched
+  }
+
   if (patched !== contents) {
     fs.writeFileSync(outFile, patched)
-    console.log('Patched libsignal-protocol.js global this -> window')
+    console.log('Patched libsignal-protocol.js globals for browser')
   }
 
   console.log('Bundled libsignal-protocol.js to public/')
