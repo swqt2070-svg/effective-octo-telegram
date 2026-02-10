@@ -1,8 +1,10 @@
 import { build } from 'esbuild'
 import path from 'path'
+import { createRequire } from 'module'
 
 const entry = path.resolve('node_modules/libsignal-protocol/dist/libsignal-protocol.js')
 const outFile = path.resolve('public/libsignal-protocol.js')
+const require = createRequire(import.meta.url)
 
 try {
   await build({
