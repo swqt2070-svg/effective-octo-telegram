@@ -8,6 +8,25 @@ import { newStoreForDevice, makeLibSignalStore, makeAddress, buildSessionFromBun
 
 function now(){ return Date.now() }
 
+function decodeCiphertext(ciphertext) {
+  if (!ciphertext) throw new Error('empty ciphertext')
+  const norm = (s) => {
+    const cleaned = String(s).replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/')
+    const pad = cleaned.length % 4
+    return pad ? cleaned + '='.repeat(4 - pad) : cleaned
+  }
+  try {
+    return JSON.parse(atob(ciphertext))
+  } catch (e1) {
+    try {
+      return JSON.parse(atob(norm(ciphertext)))
+    } catch {
+      // last resort: ciphertext already JSON
+      return JSON.parse(ciphertext)
+    }
+  }
+}
+
 export default function Chat() {
   const { token, me } = useAuth()
   const deviceId = getLocal('deviceId') || ''
@@ -43,7 +62,7 @@ export default function Chat() {
         for (const env of r.messages){
           const peerId = env.senderUserId
           try{
-            const packed = JSON.parse(atob(env.ciphertext))
+            const packed = decodeCiphertext(env.ciphertext)
             const addr = makeAddress(env.senderUserId, env.senderDeviceId)
             const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64: packed.bodyB64 })
             await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
@@ -81,7 +100,7 @@ export default function Chat() {
               for (const env of r.messages){
                 const peerId = env.senderUserId
                 try{
-                  const packed = JSON.parse(atob(env.ciphertext))
+                  const packed = decodeCiphertext(env.ciphertext)
                   const addr = makeAddress(env.senderUserId, env.senderDeviceId)
                   const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64: packed.bodyB64 })
                   await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
