@@ -22,6 +22,15 @@ if (libsignal.SessionBuilder && !libsignal.SessionBuilder.__patched) {
   libsignal.SessionBuilder = Wrapped
 }
 
+if (libsignal.SessionBuilder?.prototype?.processPreKey && !libsignal.SessionBuilder.__patchedProcess) {
+  const orig = libsignal.SessionBuilder.prototype.processPreKey
+  libsignal.SessionBuilder.prototype.processPreKey = function(device) {
+    ensureDirection(this.storage)
+    return orig.call(this, device)
+  }
+  libsignal.SessionBuilder.__patchedProcess = true
+}
+
 if (libsignal.SessionCipher && !libsignal.SessionCipher.__patched) {
   const Original = libsignal.SessionCipher
   const Wrapped = function(storage, remoteAddress) {
@@ -31,6 +40,29 @@ if (libsignal.SessionCipher && !libsignal.SessionCipher.__patched) {
   Wrapped.prototype = Original.prototype
   Wrapped.__patched = true
   libsignal.SessionCipher = Wrapped
+}
+
+if (libsignal.SessionCipher?.prototype?.encrypt && !libsignal.SessionCipher.__patchedEncrypt) {
+  const orig = libsignal.SessionCipher.prototype.encrypt
+  libsignal.SessionCipher.prototype.encrypt = function(buffer) {
+    ensureDirection(this.storage)
+    return orig.call(this, buffer)
+  }
+  libsignal.SessionCipher.__patchedEncrypt = true
+}
+
+if (libsignal.SessionCipher?.prototype?.decryptWhisperMessage && !libsignal.SessionCipher.__patchedDecrypt) {
+  const orig1 = libsignal.SessionCipher.prototype.decryptWhisperMessage
+  const orig2 = libsignal.SessionCipher.prototype.decryptPreKeyWhisperMessage
+  libsignal.SessionCipher.prototype.decryptWhisperMessage = function(buffer, encoding) {
+    ensureDirection(this.storage)
+    return orig1.call(this, buffer, encoding)
+  }
+  libsignal.SessionCipher.prototype.decryptPreKeyWhisperMessage = function(buffer, encoding) {
+    ensureDirection(this.storage)
+    return orig2.call(this, buffer, encoding)
+  }
+  libsignal.SessionCipher.__patchedDecrypt = true
 }
 
 // Utilities
