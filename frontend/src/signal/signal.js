@@ -229,8 +229,20 @@ export async function encryptToAddress(lsStore, address, plaintextObj) {
   const cipher = new libsignal.SessionCipher(lsStore, address)
   const encoded = new TextEncoder().encode(JSON.stringify(plaintextObj))
   const msg = await cipher.encrypt(encoded.buffer)
-  // msg: {type, body}
-  return { type: msg.type, bodyB64: b64FromArrayBuffer(msg.body) }
+  // msg: {type, body} where body is a binary string or ArrayBuffer
+  let bodyB64
+  if (typeof msg.body === 'string') {
+    bodyB64 = btoa(msg.body)
+  } else if (msg.body instanceof ArrayBuffer) {
+    bodyB64 = b64FromArrayBuffer(msg.body)
+  } else if (msg.body?.toArrayBuffer) {
+    bodyB64 = b64FromArrayBuffer(msg.body.toArrayBuffer())
+  } else if (msg.body?.buffer instanceof ArrayBuffer) {
+    bodyB64 = b64FromArrayBuffer(msg.body.buffer)
+  } else {
+    throw new Error('Unsupported message body type')
+  }
+  return { type: msg.type, bodyB64 }
 }
 
 export async function decryptFromAddress(lsStore, address, envelope) {
