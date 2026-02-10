@@ -41,12 +41,19 @@ export default function Chat() {
       try{
         const r = await apiGet(`/messages/pending?deviceId=${encodeURIComponent(deviceId)}&limit=200`, token)
         for (const env of r.messages){
-          const packed = JSON.parse(atob(env.ciphertext))
-          const addr = makeAddress(env.senderUserId, env.senderDeviceId)
-          const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64: packed.bodyB64 })
           const peerId = env.senderUserId
-          await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
-          await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+          try{
+            const packed = JSON.parse(atob(env.ciphertext))
+            const addr = makeAddress(env.senderUserId, env.senderDeviceId)
+            const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64: packed.bodyB64 })
+            await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
+            await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+          }catch(ex){
+            console.error('decrypt failed', ex, env)
+            const errText = ex?.message ? ex.message : String(ex)
+            await appendMessage(deviceId, peerId, { t:'sys', text:`[decrypt failed] ${errText}`, ts: now(), _ts: now() })
+            await upsertChat(deviceId, { peerId, title: peerId, lastText: '[decrypt failed]', lastTs: now() })
+          }
         }
         await refreshChats()
       }catch{
@@ -72,12 +79,19 @@ export default function Chat() {
             // trigger immediate pull
             await apiGet(`/messages/pending?deviceId=${encodeURIComponent(deviceId)}&limit=200`, token).then(async (r)=>{
               for (const env of r.messages){
-                const packed = JSON.parse(atob(env.ciphertext))
-                const addr = makeAddress(env.senderUserId, env.senderDeviceId)
-                const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64: packed.bodyB64 })
                 const peerId = env.senderUserId
-                await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
-                await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+                try{
+                  const packed = JSON.parse(atob(env.ciphertext))
+                  const addr = makeAddress(env.senderUserId, env.senderDeviceId)
+                  const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64: packed.bodyB64 })
+                  await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
+                  await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+                }catch(ex){
+                  console.error('decrypt failed', ex, env)
+                  const errText = ex?.message ? ex.message : String(ex)
+                  await appendMessage(deviceId, peerId, { t:'sys', text:`[decrypt failed] ${errText}`, ts: now(), _ts: now() })
+                  await upsertChat(deviceId, { peerId, title: peerId, lastText: '[decrypt failed]', lastTs: now() })
+                }
               }
               await refreshChats()
             }).catch(()=>{})
