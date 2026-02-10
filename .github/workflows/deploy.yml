@@ -21,8 +21,14 @@ jobs:
 
       - name: Rsync to server
         run: |
-          rsync -avz --delete --exclude='.git*' --exclude='node_modules' --exclude='.env' --exclude='*.log' -e "ssh -p ${{ secrets.DEPLOY_PORT }}" ./ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/signal-web-local/
+          HOST=$(printf "%s" "${{ secrets.DEPLOY_HOST }}" | tr -d '\r\n')
+          USER=$(printf "%s" "${{ secrets.DEPLOY_USER }}" | tr -d '\r\n')
+          PORT=$(printf "%s" "${{ secrets.DEPLOY_PORT }}" | tr -d '\r\n')
+          rsync -avz --delete --exclude='.git*' --exclude='node_modules' --exclude='.env' --exclude='*.log' -e "ssh -p $PORT" ./ "$USER@$HOST:/opt/signal-web-local/"
 
       - name: Build and restart
         run: |
-          ssh -p ${{ secrets.DEPLOY_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "cd /opt/signal-web-local && docker-compose -f docker-compose.prod.yml up -d --build"
+          HOST=$(printf "%s" "${{ secrets.DEPLOY_HOST }}" | tr -d '\r\n')
+          USER=$(printf "%s" "${{ secrets.DEPLOY_USER }}" | tr -d '\r\n')
+          PORT=$(printf "%s" "${{ secrets.DEPLOY_PORT }}" | tr -d '\r\n')
+          ssh -p "$PORT" "$USER@$HOST" "cd /opt/signal-web-local && docker-compose -f docker-compose.prod.yml up -d --build"
