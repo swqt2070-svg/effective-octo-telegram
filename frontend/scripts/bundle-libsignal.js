@@ -1,21 +1,54 @@
+import { build } from 'esbuild'
 import fs from 'fs'
 import path from 'path'
+import { createRequire } from 'module'
 
-const entry = path.resolve('node_modules/libsignal-protocol/dist/libsignal-protocol-worker.js')
+const entry = path.resolve('node_modules/libsignal-protocol/dist/libsignal-protocol.js')
 const outFile = path.resolve('public/libsignal-protocol.js')
+const require = createRequire(import.meta.url)
 
 try {
-  const src = fs.readFileSync(entry, 'utf8')
-  const patched = src
-    .replace('var libsignal = {};', 'var libsignal = window.libsignal = {};')
+  await build({
+    entryPoints: [entry],
+    bundle: true,
+    format: 'iife',
+    platform: 'browser',
+    outfile: outFile,
+    logLevel: 'info',
+    define: {
+      global: 'window',
+    },
+    banner: {
+      js: 'var require = undefined; var module = undefined; var exports = undefined; var define = undefined;',
+    },
+    plugins: [
+      {
+        name: 'alias-mocha-bytebuffer',
+        setup(build) {
+          build.onResolve({ filter: /^mocha-bytebuffer$/ }, () => ({
+            path: require.resolve('bytebuffer'),
+          }))
+        },
+      },
+    ],
+  })
+
+  const contents = fs.readFileSync(outFile, 'utf8')
+  const patched = contents
     .replace(/\}\)\(this,/g, '})(window,')
     .replace(/\}\)\(this\)/g, '})(window)')
+  if (patched !== contents) {
+    fs.writeFileSync(outFile, patched)
+    console.log('Patched libsignal-protocol.js global this -> window')
+  }
 
-  fs.mkdirSync(path.dirname(outFile), { recursive: true })
-  fs.writeFileSync(outFile, patched)
-  console.log('Prepared libsignal-protocol.js from worker bundle')
+  console.log('Bundled libsignal-protocol.js to public/')
 } catch (err) {
-  console.error('Failed to prepare libsignal-protocol.js')
-  console.error(err)
+  console.error('Failed to bundle libsignal-protocol.js')
+  if (err?.errors) {
+    for (const e of err.errors) console.error(e)
+  } else {
+    console.error(err)
+  }
   process.exit(1)
 }
