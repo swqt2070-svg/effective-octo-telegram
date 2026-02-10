@@ -81,7 +81,10 @@ export default function Chat() {
           try{
             const packed = decodeCiphertext(env.ciphertext)
             const bodyB64 = extractBodyB64(packed)
-            if (!bodyB64) throw new Error('missing bodyB64')
+            if (!bodyB64) {
+              console.error('missing bodyB64', { ciphertext: env.ciphertext, packed })
+              throw new Error('missing bodyB64')
+            }
             const addr = makeAddress(env.senderUserId, env.senderDeviceId)
             const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64 })
             await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
@@ -121,7 +124,10 @@ export default function Chat() {
                 try{
                   const packed = decodeCiphertext(env.ciphertext)
                   const bodyB64 = extractBodyB64(packed)
-                  if (!bodyB64) throw new Error('missing bodyB64')
+                  if (!bodyB64) {
+                    console.error('missing bodyB64', { ciphertext: env.ciphertext, packed })
+                    throw new Error('missing bodyB64')
+                  }
                   const addr = makeAddress(env.senderUserId, env.senderDeviceId)
                   const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64 })
                   await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
