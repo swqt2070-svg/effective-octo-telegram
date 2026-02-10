@@ -74,15 +74,25 @@ function b64FromArrayBuffer(buf) {
 }
 function normalizeB64(s) {
   if (!s) throw new Error('empty b64')
-  const cleaned = String(s).replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/')
+  const cleaned = String(s)
+    .replace(/\s+/g, '')
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+    .replace(/[^A-Za-z0-9+/=]/g, '')
   const pad = cleaned.length % 4
   return pad ? cleaned + '='.repeat(4 - pad) : cleaned
 }
 function arrayBufferFromB64(b64) {
-  const binary = atob(normalizeB64(b64))
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return bytes.buffer
+  const norm = normalizeB64(b64)
+  try {
+    const binary = atob(norm)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return bytes.buffer
+  } catch (err) {
+    console.error('invalid base64 body', { sample: String(b64).slice(0, 120), length: String(b64).length })
+    throw err
+  }
 }
 
 export function makeAddress(userId, deviceId) {
