@@ -72,8 +72,14 @@ function b64FromArrayBuffer(buf) {
   for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
   return btoa(binary)
 }
+function normalizeB64(s) {
+  if (!s) throw new Error('empty b64')
+  const cleaned = String(s).replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/')
+  const pad = cleaned.length % 4
+  return pad ? cleaned + '='.repeat(4 - pad) : cleaned
+}
 function arrayBufferFromB64(b64) {
-  const binary = atob(b64)
+  const binary = atob(normalizeB64(b64))
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes.buffer

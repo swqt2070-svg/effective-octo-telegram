@@ -27,6 +27,23 @@ function decodeCiphertext(ciphertext) {
   }
 }
 
+function toB64FromBytes(bytes) {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  let binary = ''
+  for (let i = 0; i < arr.byteLength; i++) binary += String.fromCharCode(arr[i])
+  return btoa(binary)
+}
+
+function extractBodyB64(packed) {
+  if (!packed || typeof packed !== 'object') return null
+  if (typeof packed.bodyB64 === 'string' && packed.bodyB64.length) return packed.bodyB64
+  if (typeof packed.body === 'string' && packed.body.length) return packed.body
+  if (packed.body && Array.isArray(packed.body.data)) return toB64FromBytes(packed.body.data)
+  if (Array.isArray(packed.body)) return toB64FromBytes(packed.body)
+  if (packed.ciphertext && typeof packed.ciphertext === 'string') return packed.ciphertext
+  return null
+}
+
 export default function Chat() {
   const { token, me } = useAuth()
   const deviceId = getLocal('deviceId') || ''
@@ -63,8 +80,10 @@ export default function Chat() {
           const peerId = env.senderUserId
           try{
             const packed = decodeCiphertext(env.ciphertext)
+            const bodyB64 = extractBodyB64(packed)
+            if (!bodyB64) throw new Error('missing bodyB64')
             const addr = makeAddress(env.senderUserId, env.senderDeviceId)
-            const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64: packed.bodyB64 })
+            const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64 })
             await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
             await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
           }catch(ex){
@@ -101,8 +120,10 @@ export default function Chat() {
                 const peerId = env.senderUserId
                 try{
                   const packed = decodeCiphertext(env.ciphertext)
+                  const bodyB64 = extractBodyB64(packed)
+                  if (!bodyB64) throw new Error('missing bodyB64')
                   const addr = makeAddress(env.senderUserId, env.senderDeviceId)
-                  const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64: packed.bodyB64 })
+                  const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64 })
                   await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
                   await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
                 }catch(ex){
