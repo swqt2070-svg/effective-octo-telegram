@@ -9,6 +9,9 @@ node_modules/
 # Vite
 .vite/
 
+# Frontend generated public assets
+frontend/public/libsignal-protocol.js
+
 # Env
 .env
 .env.*

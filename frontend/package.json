@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "node scripts/copy-libsignal.js"
   },
   "dependencies": {
     "idb-keyval": "^6.2.1",

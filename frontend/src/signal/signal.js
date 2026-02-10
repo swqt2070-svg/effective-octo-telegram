@@ -1,5 +1,7 @@
-import 'libsignal-protocol/dist/libsignal-protocol.js'
 const libsignal = window.libsignal
+if (!libsignal) {
+  throw new Error('libsignal not loaded. Ensure /libsignal-protocol.js is loaded before the app.')
+}
 import { SignalStore } from './store.js'
 
 // Utilities
