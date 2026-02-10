@@ -1,4 +1,5 @@
-import * as libsignal from 'libsignal-protocol'
+import 'libsignal-protocol/dist/libsignal-protocol.js'
+const libsignal = window.libsignal
 import { SignalStore } from './store.js'
 
 // Utilities
