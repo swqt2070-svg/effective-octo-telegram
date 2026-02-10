@@ -27,6 +27,4 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           port: ${{ secrets.DEPLOY_PORT }}
           key: ${{ secrets.DEPLOY_KEY }}
-          script: |
-            cd /opt/signal-web-local
-            docker-compose -f docker-compose.prod.yml up -d --build
+          script: cd /opt/signal-web-local && docker-compose -f docker-compose.prod.yml up -d --build
