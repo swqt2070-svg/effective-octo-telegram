@@ -22,7 +22,17 @@ function arrayBufferFromB64(b64) {
 export function makeAddress(userId, deviceId) {
   // libsignal expects (name, deviceIdNumber). We'll hash deviceId to int deterministically.
   const num = Math.abs(hashToInt(deviceId)) % 16384 + 1
-  return new libsignal.SignalProtocolAddress(userId, num)
+  const Addr = libsignal.SignalProtocolAddress
+  if (typeof Addr !== 'function') {
+    throw new Error('SignalProtocolAddress missing or invalid')
+  }
+  try {
+    return new Addr(userId, num)
+  } catch {
+    const addr = {}
+    Addr.call(addr, userId, num)
+    return addr
+  }
 }
 
 function hashToInt(s){
@@ -118,6 +128,9 @@ export function b64ToArrayBuffer(b64) {
 }
 
 export async function buildSessionFromBundle(lsStore, address, bundle) {
+  if (!lsStore?.Direction) {
+    lsStore.Direction = { SENDING: 1, RECEIVING: 2 }
+  }
   const builder = new libsignal.SessionBuilder(lsStore, address)
   const preKeyBundle = {
     identityKey: arrayBufferFromB64(bundle.identityKeyPub),
@@ -136,6 +149,9 @@ export async function buildSessionFromBundle(lsStore, address, bundle) {
 }
 
 export async function encryptToAddress(lsStore, address, plaintextObj) {
+  if (!lsStore?.Direction) {
+    lsStore.Direction = { SENDING: 1, RECEIVING: 2 }
+  }
   const cipher = new libsignal.SessionCipher(lsStore, address)
   const encoded = new TextEncoder().encode(JSON.stringify(plaintextObj))
   const msg = await cipher.encrypt(encoded.buffer)
@@ -144,6 +160,9 @@ export async function encryptToAddress(lsStore, address, plaintextObj) {
 }
 
 export async function decryptFromAddress(lsStore, address, envelope) {
+  if (!lsStore?.Direction) {
+    lsStore.Direction = { SENDING: 1, RECEIVING: 2 }
+  }
   const cipher = new libsignal.SessionCipher(lsStore, address)
   const bodyBuf = arrayBufferFromB64(envelope.bodyB64 || envelope.ciphertext)
   let plainBuf
