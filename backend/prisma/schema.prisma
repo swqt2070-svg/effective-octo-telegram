@@ -41,6 +41,8 @@ model User {
   smartKeys    SmartKey[]
   groupMemberships GroupMember[]
   groupsOwned  Group[]       @relation("groupOwner")
+  aliasesOwned ContactAlias[] @relation("aliasOwner")
+  aliasesPeer  ContactAlias[] @relation("aliasPeer")
 }
 
 model Device {
@@ -185,4 +187,19 @@ model GroupMember {
   user      User      @relation(fields: [userId], references: [id])
 
   @@unique([groupId, userId])
+}
+
+model ContactAlias {
+  id          String   @id @default(cuid())
+  ownerUserId String
+  peerUserId  String
+  alias       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner       User     @relation("aliasOwner", fields: [ownerUserId], references: [id])
+  peer        User     @relation("aliasPeer", fields: [peerUserId], references: [id])
+
+  @@unique([ownerUserId, peerUserId])
+  @@index([ownerUserId])
 }

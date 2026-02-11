@@ -163,6 +163,17 @@ export default function Chat() {
   }, [token, deviceId])
 
   useEffect(() => {
+    if (!token || !deviceId) return
+    apiGet('/contacts/aliases', token).then(async (r) => {
+      const list = r.aliases || []
+      for (const a of list) {
+        await upsertChat(deviceId, { peerId: a.peerUserId, alias: a.alias })
+      }
+      await refreshChats()
+    }).catch(()=>{})
+  }, [token, deviceId])
+
+  useEffect(() => {
     let t
     async function poll(){
       if (!token || !deviceId || !lsStore) return
@@ -889,7 +900,7 @@ export default function Chat() {
                 </button>
               </div>
               <div className="info-section">
-                <div className="info-row"><span>Username</span><strong>{infoTarget.name}</strong></div>
+                <div className="info-row"><span>Username</span><strong>{infoTarget.username || infoTarget.name}</strong></div>
                 <div className="info-row"><span>ID</span><strong className="mono">{shortId(infoTarget.id)}</strong></div>
                 <div className="info-row"><span>Status</span><strong>Online</strong></div>
               </div>
@@ -911,6 +922,9 @@ export default function Chat() {
                         className="btn primary"
                         onClick={async () => {
                           const nextAlias = aliasDraft.trim()
+                          try {
+                            await apiPost('/contacts/alias', { peerUserId: activePeer.peerId, alias: nextAlias || '' }, token)
+                          } catch {}
                           await upsertChat(deviceId, { peerId: activePeer.peerId, alias: nextAlias || null })
                           setActivePeer(prev => prev ? { ...prev, alias: nextAlias } : prev)
                           await refreshChats(activePeer.peerId)
@@ -922,6 +936,9 @@ export default function Chat() {
                         className="btn ghost"
                         onClick={async () => {
                           setAliasDraft('')
+                          try {
+                            await apiPost('/contacts/alias', { peerUserId: activePeer.peerId, alias: '' }, token)
+                          } catch {}
                           await upsertChat(deviceId, { peerId: activePeer.peerId, alias: null })
                           setActivePeer(prev => prev ? { ...prev, alias: '' } : prev)
                           await refreshChats(activePeer.peerId)

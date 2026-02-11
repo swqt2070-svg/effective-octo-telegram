@@ -335,6 +335,46 @@ app.get('/users/lookup', authMiddleware, async (req, res) => {
   return res.json({ user: { ...user, avatarUrl } });
 });
 
+// ===== Contact aliases =====
+app.get('/contacts/aliases', authMiddleware, async (req, res) => {
+  await ensureActiveUser(req.user.sub);
+  const aliases = await prisma.contactAlias.findMany({
+    where: { ownerUserId: req.user.sub },
+    select: { peerUserId: true, alias: true },
+    orderBy: { updatedAt: 'desc' },
+  });
+  return res.json({ aliases });
+});
+
+app.post('/contacts/alias', authMiddleware, async (req, res) => {
+  const schema = z.object({
+    peerUserId: z.string().min(10),
+    alias: z.string().max(64).optional().nullable(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
+
+  await ensureActiveUser(req.user.sub);
+  const peer = await prisma.user.findUnique({ where: { id: parsed.data.peerUserId } });
+  if (!peer) return res.status(404).json({ error: 'peer_not_found' });
+
+  const alias = (parsed.data.alias || '').trim();
+  if (!alias) {
+    await prisma.contactAlias.deleteMany({
+      where: { ownerUserId: req.user.sub, peerUserId: parsed.data.peerUserId },
+    });
+    return res.json({ ok: true, alias: null });
+  }
+
+  const row = await prisma.contactAlias.upsert({
+    where: { ownerUserId_peerUserId: { ownerUserId: req.user.sub, peerUserId: parsed.data.peerUserId } },
+    create: { ownerUserId: req.user.sub, peerUserId: parsed.data.peerUserId, alias },
+    update: { alias },
+    select: { peerUserId: true, alias: true },
+  });
+  return res.json({ ok: true, alias: row.alias });
+});
+
 // Update profile (username/displayName)
 app.patch('/users/me', authMiddleware, async (req, res) => {
   const schema = z.object({
