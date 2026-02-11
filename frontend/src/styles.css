@@ -153,12 +153,15 @@ a:hover { text-decoration: underline; }
   gap: 12px;
   padding: 16px;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .panel {
   background: rgba(14, 23, 35, 0.9);
   border: 1px solid var(--stroke);
   border-radius: 18px;
+  min-height: 0;
 }
 
 .nav-rail {
@@ -169,6 +172,8 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   justify-content: space-between;
   padding: 12px 10px;
+  height: 100%;
+  overflow: hidden;
 }
 
 .nav-rail-top { display: flex; justify-content: center; margin-bottom: 8px; }
@@ -209,6 +214,8 @@ a:hover { text-decoration: underline; }
   padding: 16px;
   gap: 12px;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 .chat-list-top {
   display: flex;
@@ -305,6 +312,7 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   overflow: hidden;
   min-height: 0;
+  height: 100%;
 }
 
 .chat-header {
