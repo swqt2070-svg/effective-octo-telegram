@@ -575,7 +575,7 @@ export default function Chat() {
     return ''
   }
   const meId = me?.id || ''
-  const hitSet = useMemo(() => new Set(searchHits), [searchHits])
+  const hitSet = searchHits.length ? new Set(searchHits) : new Set()
   const renderedMessages = []
   let lastDayKey = ''
   for (let idx = 0; idx < messages.length; idx += 1) {
