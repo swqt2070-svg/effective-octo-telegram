@@ -491,6 +491,13 @@ a:hover { text-decoration: underline; }
 }
 .reply-cancel { width: 32px; height: 32px; }
 
+.bubble-sender {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: rgba(230, 237, 245, 0.85);
+}
+
 .composer {
   padding: 14px;
   display: flex;

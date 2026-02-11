@@ -97,6 +97,7 @@ export default function Chat() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHits, setSearchHits] = useState([])
   const [searchIndex, setSearchIndex] = useState(0)
+  const [aliasDraft, setAliasDraft] = useState('')
   const [showGroupModal, setShowGroupModal] = useState(false)
   const [groupName, setGroupName] = useState('')
   const [groupMembers, setGroupMembers] = useState('')
@@ -138,6 +139,7 @@ export default function Chat() {
     setSearchQuery('')
     setSearchHits([])
     setSearchIndex(0)
+    setAliasDraft(activePeer?.alias || '')
   }, [activePeer?.peerId])
   useEffect(() => {
     return () => {
@@ -315,7 +317,8 @@ export default function Chat() {
     try{
       const r = await apiGet(`/users/lookup?q=${encodeURIComponent(q)}`, token)
       const u = r.user
-      const peer = { peerId: u.id, username: u.username, displayName: u.displayName }
+      const existing = chats.find(c => c.peerId === u.id)
+      const peer = { peerId: u.id, username: u.username, displayName: u.displayName, alias: existing?.alias || '' }
       setActivePeer(peer)
       await upsertChat(deviceId, { peerId: u.id, title: u.username, lastText: '', lastTs: 0 })
       const msgs = await loadMessages(deviceId, u.id)
@@ -329,7 +332,7 @@ export default function Chat() {
 
   async function openChat(peerId){
     const c = chats.find(x => x.peerId === peerId)
-    const peer = { peerId, username: c?.title || peerId, displayName: '', isGroup: c?.isGroup, groupId: c?.groupId }
+    const peer = { peerId, username: c?.title || peerId, displayName: '', alias: c?.alias || '', isGroup: c?.isGroup, groupId: c?.groupId }
     setActivePeer(peer)
     const msgs = await loadMessages(deviceId, peerId)
     setMessages(msgs)
@@ -562,11 +565,13 @@ export default function Chat() {
   }
 
   const meInitial = me?.username ? me.username.slice(0, 1).toUpperCase() : 'U'
-  const activeTitle = activePeer ? (activePeer.username || shortId(activePeer.peerId)) : 'Select a chat'
+  const activeTitle = activePeer ? (activePeer.alias || activePeer.username || shortId(activePeer.peerId)) : 'Select a chat'
   const activeId = activePeer?.peerId || ''
-  const activeInitial = activePeer?.username ? activePeer.username.slice(0, 1).toUpperCase() : shortId(activeId).slice(0, 1).toUpperCase()
+  const activeInitial = activePeer?.alias
+    ? activePeer.alias.slice(0, 1).toUpperCase()
+    : (activePeer?.username ? activePeer.username.slice(0, 1).toUpperCase() : shortId(activeId).slice(0, 1).toUpperCase())
   const infoTarget = activePeer
-    ? { name: activeTitle, id: activeId, role: activePeer?.isGroup ? 'Group' : 'Contact' }
+    ? { name: activeTitle, id: activeId, role: activePeer?.isGroup ? 'Group' : 'Contact', username: activePeer?.username, alias: activePeer?.alias }
     : (me ? { name: me.username || shortId(me.id), id: me.id, role: 'You' } : null)
   const replyPreview = (m) => {
     if (!m) return ''
@@ -594,6 +599,8 @@ export default function Chat() {
     const canReply = !sys
     const key = messageKey(m, idx)
     const hit = hitSet.has(idx)
+    const showSender = activePeer?.isGroup && !sys
+    const senderName = mine ? 'You' : (m?.fromUsername || shortId(m?.from))
     renderedMessages.push(
       <div id={`msg-${idx}`} key={`msg-${idx}`} className={`msg-row ${mine ? 'out' : 'in'} ${sys ? 'sys' : ''}`}>
         {m?.t === 'file' ? (
@@ -607,6 +614,7 @@ export default function Chat() {
                 <div className="reply-text">{reply.text || ''}</div>
               </div>
             )}
+            {showSender && <div className="bubble-sender">{senderName}</div>}
             <div className="file-card">
               <div className="file-meta">
                 <div className="file-name">{m.file?.name || 'file'}</div>
@@ -645,6 +653,7 @@ export default function Chat() {
                 <div className="reply-text">{reply.text || ''}</div>
               </div>
             )}
+            {showSender && <div className="bubble-sender">{senderName}</div>}
             <div className="bubble-text">{m.text}</div>
             <div className="bubble-time">{formatTime(ts)}</div>
           </div>
@@ -744,7 +753,7 @@ export default function Chat() {
           <div className="chat-items">
             {chats.map(c => {
               const isActive = activePeer?.peerId === c.peerId
-              const title = c.title || shortId(c.peerId)
+              const title = c.alias || c.title || shortId(c.peerId)
               const lastTs = c.lastTs || 0
               return (
                 <button key={c.peerId} onClick={()=>openChat(c.peerId)} className={`chat-item ${isActive ? 'active' : ''}`}>
@@ -884,6 +893,46 @@ export default function Chat() {
                 <div className="info-row"><span>ID</span><strong className="mono">{shortId(infoTarget.id)}</strong></div>
                 <div className="info-row"><span>Status</span><strong>Online</strong></div>
               </div>
+              {!activePeer?.isGroup && activePeer?.peerId !== me?.id && (
+                <>
+                  <div className="menu-divider" />
+                  <div className="info-section">
+                    <div className="panel-title">Local name</div>
+                    <div className="device-row">
+                      <input
+                        className="input"
+                        placeholder="Set local name"
+                        value={aliasDraft}
+                        onChange={(e) => setAliasDraft(e.target.value)}
+                      />
+                    </div>
+                    <div className="device-actions">
+                      <button
+                        className="btn primary"
+                        onClick={async () => {
+                          const nextAlias = aliasDraft.trim()
+                          await upsertChat(deviceId, { peerId: activePeer.peerId, alias: nextAlias || null })
+                          setActivePeer(prev => prev ? { ...prev, alias: nextAlias } : prev)
+                          await refreshChats(activePeer.peerId)
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="btn ghost"
+                        onClick={async () => {
+                          setAliasDraft('')
+                          await upsertChat(deviceId, { peerId: activePeer.peerId, alias: null })
+                          setActivePeer(prev => prev ? { ...prev, alias: '' } : prev)
+                          await refreshChats(activePeer.peerId)
+                        }}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="menu-divider" />
               <div className="info-section">
                 <button className="menu-item">
