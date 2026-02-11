@@ -357,6 +357,21 @@ a:hover { text-decoration: underline; }
   min-height: 0;
 }
 
+.chat-searchbar {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--stroke);
+  background: rgba(10, 18, 28, 0.6);
+}
+.search-count {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 52px;
+  text-align: center;
+}
+
 .file-card {
   display: flex;
   flex-direction: column;
@@ -388,6 +403,9 @@ a:hover { text-decoration: underline; }
 }
 .bubble.replyable { cursor: pointer; }
 .bubble.replyable:hover { box-shadow: 0 0 0 1px rgba(76, 201, 240, 0.3); }
+.bubble-hit {
+  box-shadow: 0 0 0 2px rgba(76, 201, 240, 0.55);
+}
 
 .bubble-out {
   background: linear-gradient(135deg, rgba(58, 124, 255, 0.9), rgba(30, 99, 255, 0.9));
@@ -404,6 +422,20 @@ a:hover { text-decoration: underline; }
   font-size: 11px;
   color: rgba(230, 237, 245, 0.7);
   text-align: right;
+}
+
+.date-divider {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0;
+}
+.date-divider span {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: rgba(9, 16, 26, 0.7);
 }
 
 .reply-chip {

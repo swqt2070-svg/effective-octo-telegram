@@ -18,6 +18,11 @@ function formatTime(ts){
   const d = new Date(ts)
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
+function formatDay(ts){
+  if (!ts) return ''
+  const d = new Date(ts)
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+}
 
 function decodeCiphertext(ciphertext) {
   if (!ciphertext) throw new Error('empty ciphertext')
@@ -88,6 +93,10 @@ export default function Chat() {
   const [fileBusy, setFileBusy] = useState(false)
   const [fileUrls, setFileUrls] = useState({})
   const [replyTo, setReplyTo] = useState(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchHits, setSearchHits] = useState([])
+  const [searchIndex, setSearchIndex] = useState(0)
   const [showGroupModal, setShowGroupModal] = useState(false)
   const [groupName, setGroupName] = useState('')
   const [groupMembers, setGroupMembers] = useState('')
@@ -122,7 +131,14 @@ export default function Chat() {
   }
 
   useEffect(() => { refreshChats().catch(()=>{}) }, [deviceId])
-  useEffect(() => { setShowInfo(false); setReplyTo(null) }, [activePeer?.peerId])
+  useEffect(() => {
+    setShowInfo(false)
+    setReplyTo(null)
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchHits([])
+    setSearchIndex(0)
+  }, [activePeer?.peerId])
   useEffect(() => {
     return () => {
       for (const url of fileUrlCacheRef.current.values()) {
@@ -206,6 +222,31 @@ export default function Chat() {
       el.scrollTop = el.scrollHeight
     })
   }, [activePeer?.peerId, messages.length])
+
+  useEffect(() => {
+    if (!searchOpen || !searchQuery.trim()) {
+      setSearchHits([])
+      setSearchIndex(0)
+      return
+    }
+    const q = searchQuery.trim().toLowerCase()
+    const hits = []
+    for (let i = 0; i < messages.length; i += 1) {
+      const m = messages[i]
+      const text = (m?.text || m?.file?.name || '').toLowerCase()
+      if (text && text.includes(q)) hits.push(i)
+    }
+    setSearchHits(hits)
+    setSearchIndex(0)
+  }, [searchOpen, searchQuery, messages])
+
+  useEffect(() => {
+    if (!searchOpen || !searchQuery.trim()) return
+    if (!searchHits.length) return
+    const idx = searchHits[Math.max(0, Math.min(searchIndex, searchHits.length - 1))]
+    const el = document.getElementById(`msg-${idx}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [searchOpen, searchQuery, searchHits, searchIndex])
 
   // WebSocket notify
   useEffect(() => {
@@ -533,6 +574,83 @@ export default function Chat() {
     if (m.text) return m.text
     return ''
   }
+  const hitSet = useMemo(() => new Set(searchHits), [searchHits])
+  const renderedMessages = []
+  let lastDayKey = ''
+  for (let idx = 0; idx < messages.length; idx += 1) {
+    const m = messages[idx]
+    const ts = m?._ts || m?.ts || now()
+    const dayKey = new Date(ts).toDateString()
+    if (dayKey !== lastDayKey) {
+      renderedMessages.push(
+        <div key={`day-${idx}`} className="date-divider"><span>{formatDay(ts)}</span></div>
+      )
+      lastDayKey = dayKey
+    }
+    const mine = m?.from === me.id
+    const sys = m?.t === 'sys'
+    const reply = m?.reply
+    const canReply = !sys
+    const key = messageKey(m, idx)
+    const hit = hitSet.has(idx)
+    renderedMessages.push(
+      <div id={`msg-${idx}`} key={`msg-${idx}`} className={`msg-row ${mine ? 'out' : 'in'} ${sys ? 'sys' : ''}`}>
+        {m?.t === 'file' ? (
+          <div
+            className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${canReply ? 'replyable' : ''} ${hit ? 'bubble-hit' : ''}`}
+            onClick={() => { if (canReply) setReplyTo({ from: m.from, fromUsername: m.fromUsername, text: replyPreview(m), ts }) }}
+          >
+            {reply && (
+              <div className="reply-chip">
+                <div className="reply-author">{reply.fromUsername || shortId(reply.from)}</div>
+                <div className="reply-text">{reply.text || ''}</div>
+              </div>
+            )}
+            <div className="file-card">
+              <div className="file-meta">
+                <div className="file-name">{m.file?.name || 'file'}</div>
+                <div className="file-size">{formatSize(m.file?.size)}</div>
+              </div>
+              <div className="file-actions">
+                {fileUrls[key] ? (
+                  <button className="pill" onClick={() => window.open(fileUrls[key], '_blank')}>Open</button>
+                ) : (
+                  <button className="pill" onClick={() => ensureFileUrl(m, idx).catch(() => {})}>Decrypt</button>
+                )}
+                <button className="pill" onClick={async () => {
+                  try {
+                    const url = fileUrls[key] || await ensureFileUrl(m, idx)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = m.file?.name || 'file'
+                    a.click()
+                  } catch {}
+                }}>Download</button>
+              </div>
+              {fileUrls[key] && m.file?.mime?.startsWith('image/') && (
+                <img className="file-preview" src={fileUrls[key]} alt={m.file?.name || 'image'} />
+              )}
+            </div>
+            <div className="bubble-time">{formatTime(ts)}</div>
+          </div>
+        ) : (
+          <div
+            className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${sys ? 'bubble-sys' : ''} ${canReply ? 'replyable' : ''} ${hit ? 'bubble-hit' : ''}`}
+            onClick={() => { if (canReply) setReplyTo({ from: m.from, fromUsername: m.fromUsername, text: replyPreview(m), ts }) }}
+          >
+            {reply && (
+              <div className="reply-chip">
+                <div className="reply-author">{reply.fromUsername || shortId(reply.from)}</div>
+                <div className="reply-text">{reply.text || ''}</div>
+              </div>
+            )}
+            <div className="bubble-text">{m.text}</div>
+            <div className="bubble-time">{formatTime(ts)}</div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="app-shell">
@@ -656,7 +774,7 @@ export default function Chat() {
               </div>
             </div>
             <div className="chat-actions">
-              <button className="icon-btn" title="Search">
+              <button className="icon-btn" title="Search" onClick={() => setSearchOpen(v => !v)}>
                 <svg viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 1 0 14a7 7 0 0 1 0-14Zm0 2a5 5 0 1 0 0 10a5 5 0 0 0 0-10Zm8.7 12.3l-3-3 1.4-1.4 3 3-1.4 1.4z"/></svg>
               </button>
               <button className="icon-btn" title="Info" onClick={() => setShowInfo(!showInfo)}>
@@ -665,72 +783,52 @@ export default function Chat() {
             </div>
           </div>
 
+          {searchOpen && (
+            <div className="chat-searchbar">
+              <input
+                className="input ghost"
+                placeholder="Search in chat"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              <div className="search-count">
+                {searchHits.length ? `${Math.min(searchIndex + 1, searchHits.length)}/${searchHits.length}` : '0'}
+              </div>
+              <button
+                className="icon-btn ghost"
+                title="Previous"
+                onClick={() => {
+                  if (!searchHits.length) return
+                  setSearchIndex((i) => (i - 1 + searchHits.length) % searchHits.length)
+                }}
+                disabled={!searchHits.length}
+              >
+                <svg viewBox="0 0 24 24"><path d="M7 14l5-5 5 5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
+              </button>
+              <button
+                className="icon-btn ghost"
+                title="Next"
+                onClick={() => {
+                  if (!searchHits.length) return
+                  setSearchIndex((i) => (i + 1) % searchHits.length)
+                }}
+                disabled={!searchHits.length}
+              >
+                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
+              </button>
+              <button
+                className="icon-btn ghost"
+                title="Close"
+                onClick={() => { setSearchOpen(false); setSearchQuery(''); }}
+              >
+                <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6l-12 12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
+              </button>
+            </div>
+          )}
+
           <div className="messages-pane" ref={messagesPaneRef}>
             {!activePeer && <div className="empty-state">Choose a chat on the left.</div>}
-            {activePeer && messages.map((m, idx) => {
-              const mine = m.from === me.id
-              const sys = m.t === 'sys'
-              const key = messageKey(m, idx)
-              const reply = m.reply
-              const canReply = !sys
-              return (
-                <div key={idx} className={`msg-row ${mine ? 'out' : 'in'} ${sys ? 'sys' : ''}`}>
-                  {m.t === 'file' ? (
-                    <div
-                      className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${canReply ? 'replyable' : ''}`}
-                      onClick={() => { if (canReply) setReplyTo({ from: m.from, fromUsername: m.fromUsername, text: replyPreview(m), ts: m._ts || m.ts || now() }) }}
-                    >
-                      {reply && (
-                        <div className="reply-chip">
-                          <div className="reply-author">{reply.fromUsername || shortId(reply.from)}</div>
-                          <div className="reply-text">{reply.text || ''}</div>
-                        </div>
-                      )}
-                      <div className="file-card">
-                        <div className="file-meta">
-                          <div className="file-name">{m.file?.name || 'file'}</div>
-                          <div className="file-size">{formatSize(m.file?.size)}</div>
-                        </div>
-                        <div className="file-actions">
-                          {fileUrls[key] ? (
-                            <button className="pill" onClick={() => window.open(fileUrls[key], '_blank')}>Open</button>
-                          ) : (
-                            <button className="pill" onClick={() => ensureFileUrl(m, idx).catch(() => {})}>Decrypt</button>
-                          )}
-                          <button className="pill" onClick={async () => {
-                            try {
-                              const url = fileUrls[key] || await ensureFileUrl(m, idx)
-                              const a = document.createElement('a')
-                              a.href = url
-                              a.download = m.file?.name || 'file'
-                              a.click()
-                            } catch {}
-                          }}>Download</button>
-                        </div>
-                        {fileUrls[key] && m.file?.mime?.startsWith('image/') && (
-                          <img className="file-preview" src={fileUrls[key]} alt={m.file?.name || 'image'} />
-                        )}
-                      </div>
-                      <div className="bubble-time">{formatTime(m._ts||m.ts||now())}</div>
-                    </div>
-                  ) : (
-                    <div
-                      className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${sys ? 'bubble-sys' : ''} ${canReply ? 'replyable' : ''}`}
-                      onClick={() => { if (canReply) setReplyTo({ from: m.from, fromUsername: m.fromUsername, text: replyPreview(m), ts: m._ts || m.ts || now() }) }}
-                    >
-                      {reply && (
-                        <div className="reply-chip">
-                          <div className="reply-author">{reply.fromUsername || shortId(reply.from)}</div>
-                          <div className="reply-text">{reply.text || ''}</div>
-                        </div>
-                      )}
-                      <div className="bubble-text">{m.text}</div>
-                      <div className="bubble-time">{formatTime(m._ts||m.ts||now())}</div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+            {activePeer && renderedMessages}
           </div>
 
           {emojiOpen && (

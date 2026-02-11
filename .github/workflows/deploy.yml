@@ -32,4 +32,4 @@ jobs:
 
       - name: Build and restart
         run: |
-          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "cd /opt/signal-web-local && (docker compose -f docker-compose.prod.yml up -d --build || docker-compose -f docker-compose.prod.yml up -d --build)"
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "cd /opt/signal-web-local && (docker compose -f docker-compose.prod.yml up -d --build || docker-compose -f docker-compose.prod.yml up -d --build) && (docker compose -f docker-compose.prod.yml restart caddy || docker-compose -f docker-compose.prod.yml restart caddy)"
