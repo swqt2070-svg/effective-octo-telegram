@@ -442,6 +442,21 @@ a:hover { text-decoration: underline; }
   z-index: 30;
 }
 .menu-backdrop.show { opacity: 1; pointer-events: auto; }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 10, 16, 0.55);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+}
+.modal-card {
+  width: min(520px, 92vw);
+  background: rgba(14, 23, 35, 0.95);
+  border: 1px solid var(--stroke);
+  border-radius: 18px;
+  padding: 20px;
+}
 .menu-drawer {
   position: fixed;
   top: 72px;

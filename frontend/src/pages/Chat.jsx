@@ -6,6 +6,7 @@ import { listChats, upsertChat, loadMessages, appendMessage, deleteChat } from '
 import { newStoreForDevice, makeLibSignalStore, makeAddress, buildSessionFromBundle, encryptToAddress, decryptFromAddress } from '../signal/signal.js'
 import { ensureDeviceSetup } from '../utils/deviceSetup.js'
 import { aesGcmEncrypt, aesGcmDecrypt } from '../utils/crypto.js'
+import { addNotification } from '../utils/notificationsStore.js'
 
 function now(){ return Date.now() }
 function shortId(s){
@@ -75,6 +76,7 @@ export default function Chat() {
   const { token, me, logout } = useAuth()
   const [deviceId, setDeviceId] = useState('')
   const [chats, setChats] = useState([])
+  const [groups, setGroups] = useState([])
   const [activePeer, setActivePeer] = useState(null) // {peerId, username, displayName}
   const [messages, setMessages] = useState([])
   const [search, setSearch] = useState('')
@@ -85,6 +87,9 @@ export default function Chat() {
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [fileBusy, setFileBusy] = useState(false)
   const [fileUrls, setFileUrls] = useState({})
+  const [showGroupModal, setShowGroupModal] = useState(false)
+  const [groupName, setGroupName] = useState('')
+  const [groupMembers, setGroupMembers] = useState('')
   const wsRef = useRef(null)
   const activePeerRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -126,13 +131,25 @@ export default function Chat() {
   }, [])
 
   useEffect(() => {
+    if (!token || !deviceId) return
+    apiGet('/groups', token).then(async (r) => {
+      const list = r.groups || []
+      setGroups(list)
+      for (const g of list) {
+        await upsertChat(deviceId, { peerId: `group:${g.id}`, title: g.name, isGroup: true, groupId: g.id, lastText: '', lastTs: 0 })
+      }
+      await refreshChats()
+    }).catch(()=>{})
+  }, [token, deviceId])
+
+  useEffect(() => {
     let t
     async function poll(){
       if (!token || !deviceId || !lsStore) return
       try{
         const r = await apiGet(`/messages/pending?deviceId=${encodeURIComponent(deviceId)}&limit=200`, token)
         for (const env of r.messages){
-          const peerId = env.senderUserId
+          let peerId = env.senderUserId
           try{
             const packed = decodeCiphertext(env.ciphertext)
             const bodyB64 = extractBodyB64(packed)
@@ -151,8 +168,16 @@ export default function Chat() {
               await refreshChats()
               continue
             }
+            if (plain?.t === 'group' && plain.groupId) {
+              peerId = `group:${plain.groupId}`
+              await upsertChat(deviceId, { peerId, title: plain.groupName || 'Group', isGroup: true, groupId: plain.groupId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+            } else {
+              await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+            }
             await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
-            await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+            if (activePeerRef.current?.peerId !== peerId) {
+              await addNotification({ id: `${env.id}`, ts: Date.parse(env.createdAt), peerId, text: plain.text || (plain.t === 'file' ? (plain.file?.name || 'file') : 'message') })
+            }
           }catch(ex){
             console.error('decrypt failed', ex, { id: env.id, len: env.ciphertext?.length, sample: String(env.ciphertext || '').slice(0, 80) })
             const errText = ex?.message ? ex.message : String(ex)
@@ -184,7 +209,7 @@ export default function Chat() {
             // trigger immediate pull
             await apiGet(`/messages/pending?deviceId=${encodeURIComponent(deviceId)}&limit=200`, token).then(async (r)=>{
               for (const env of r.messages){
-                const peerId = env.senderUserId
+                let peerId = env.senderUserId
                 try{
                   const packed = decodeCiphertext(env.ciphertext)
                   const bodyB64 = extractBodyB64(packed)
@@ -203,8 +228,16 @@ export default function Chat() {
                     await refreshChats()
                     continue
                   }
+                  if (plain?.t === 'group' && plain.groupId) {
+                    peerId = `group:${plain.groupId}`
+                    await upsertChat(deviceId, { peerId, title: plain.groupName || 'Group', isGroup: true, groupId: plain.groupId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+                  } else {
+                    await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+                  }
                   await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
-                  await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
+                  if (activePeerRef.current?.peerId !== peerId) {
+                    await addNotification({ id: `${env.id}`, ts: Date.parse(env.createdAt), peerId, text: plain.text || (plain.t === 'file' ? (plain.file?.name || 'file') : 'message') })
+                  }
                 }catch(ex){
                   console.error('decrypt failed', ex, { id: env.id, len: env.ciphertext?.length, sample: String(env.ciphertext || '').slice(0, 80) })
                   const errText = ex?.message ? ex.message : String(ex)
@@ -230,9 +263,9 @@ export default function Chat() {
     try{
       const r = await apiGet(`/users/lookup?q=${encodeURIComponent(q)}`, token)
       const u = r.user
-      const peer = { peerId: u.id, username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl || '' }
+      const peer = { peerId: u.id, username: u.username, displayName: u.displayName }
       setActivePeer(peer)
-      await upsertChat(deviceId, { peerId: u.id, title: u.username, lastText: '', lastTs: 0, avatarUrl: u.avatarUrl || '' })
+      await upsertChat(deviceId, { peerId: u.id, title: u.username, lastText: '', lastTs: 0 })
       const msgs = await loadMessages(deviceId, u.id)
       setMessages(msgs)
       await refreshChats()
@@ -244,7 +277,7 @@ export default function Chat() {
 
   async function openChat(peerId){
     const c = chats.find(x => x.peerId === peerId)
-    const peer = { peerId, username: c?.title || peerId, displayName: '', avatarUrl: c?.avatarUrl || '' }
+    const peer = { peerId, username: c?.title || peerId, displayName: '', isGroup: c?.isGroup, groupId: c?.groupId }
     setActivePeer(peer)
     const msgs = await loadMessages(deviceId, peerId)
     setMessages(msgs)
@@ -298,6 +331,15 @@ export default function Chat() {
 
   async function deleteChatForBoth(){
     if (!activePeer) return
+    if (activePeer.isGroup) {
+      try { await apiPost(`/groups/${encodeURIComponent(activePeer.groupId)}/leave`, {}, token) } catch {}
+      await deleteChat(deviceId, activePeer.peerId)
+      setActivePeer(null)
+      setMessages([])
+      await refreshChats()
+      setShowInfo(false)
+      return
+    }
     const peerId = activePeer.peerId
     setShowInfo(false)
     await deleteChat(deviceId, peerId)
@@ -320,11 +362,78 @@ export default function Chat() {
     }catch{}
   }
 
+  async function openSavedMessages(){
+    setShowMenu(false)
+    if (!me?.id) return
+    const peerId = me.id
+    await upsertChat(deviceId, { peerId, title: 'Saved messages', lastText: '', lastTs: 0 })
+    const peer = { peerId, username: 'Saved messages', displayName: '', isGroup: false }
+    setActivePeer(peer)
+    const msgs = await loadMessages(deviceId, peerId)
+    setMessages(msgs)
+  }
+
+  async function createGroup(){
+    if (!groupName.trim()) return
+    const names = groupMembers.split(',').map(s => s.trim()).filter(Boolean)
+    const ids = []
+    for (const name of names) {
+      try {
+        const r = await apiGet(`/users/lookup?q=${encodeURIComponent(name)}`, token)
+        if (r.user?.id) ids.push(r.user.id)
+      } catch {}
+    }
+    const r = await apiPost('/groups', { name: groupName.trim(), memberIds: ids }, token)
+    const g = r.group
+    if (g?.id) {
+      await upsertChat(deviceId, { peerId: `group:${g.id}`, title: g.name, isGroup: true, groupId: g.id, lastText: '', lastTs: 0 })
+      setGroups(prev => [g, ...prev])
+      setActivePeer({ peerId: `group:${g.id}`, username: g.name, isGroup: true, groupId: g.id })
+      setMessages([])
+    }
+    setGroupName('')
+    setGroupMembers('')
+    setShowGroupModal(false)
+  }
+
   async function sendMessage(){
     if (!activePeer || !sendText.trim()) return
     const text = sendText.trim()
     setSendText('')
-    await sendPayload(activePeer.peerId, { t:'msg', text }, text)
+    if (activePeer.isGroup) {
+      await sendGroupMessage(activePeer, text)
+    } else {
+      await sendPayload(activePeer.peerId, { t:'msg', text }, text)
+    }
+  }
+
+  async function sendGroupMessage(groupPeer, text){
+    const groupId = groupPeer.groupId
+    if (!groupId) return
+    const ts = now()
+    const groupName = groupPeer.username || 'Group'
+    const payload = { t:'group', groupId, groupName, text, ts }
+    const peerId = `group:${groupId}`
+
+    await appendMessage(deviceId, peerId, { ...payload, from: me.id, fromUsername: me.username, _ts: ts })
+    await upsertChat(deviceId, { peerId, title: groupName, isGroup: true, groupId, lastText: text, lastTs: ts })
+    await refreshChats(peerId)
+
+    const members = await apiGet(`/groups/${encodeURIComponent(groupId)}/members`, token)
+    const users = members.members || []
+    for (const u of users) {
+      if (u.id === me.id) continue
+      try {
+        const envelopes = await buildEnvelopes(u.id, { ...payload, from: me.id, fromUsername: me.username })
+        if (envelopes.length) {
+          await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: u.id, envelopes }, token)
+        }
+      } catch {}
+    }
+    // also sync to my other devices
+    try {
+      await sendControl(me.id, { ...payload, from: me.id, fromUsername: me.username }, [deviceId])
+    } catch {}
   }
 
   async function sendFiles(fileList){
@@ -400,7 +509,7 @@ export default function Chat() {
   const activeId = activePeer?.peerId || ''
   const activeInitial = activePeer?.username ? activePeer.username.slice(0, 1).toUpperCase() : shortId(activeId).slice(0, 1).toUpperCase()
   const infoTarget = activePeer
-    ? { name: activeTitle, id: activeId, role: 'Contact' }
+    ? { name: activeTitle, id: activeId, role: activePeer?.isGroup ? 'Group' : 'Contact' }
     : (me ? { name: me.username || shortId(me.id), id: me.id, role: 'You' } : null)
 
   return (
@@ -420,19 +529,19 @@ export default function Chat() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0-4-4a4 4 0 0 0 4 4Zm0 2c-4.4 0-8 2-8 4.5V21h16v-2.5c0-2.5-3.6-4.5-8-4.5Z" /></svg>
             <span>My profile</span>
           </button>
-          <button className="menu-item" onClick={() => setShowMenu(false)}>
+          <button className="menu-item" onClick={() => { setShowMenu(false); setShowGroupModal(true) }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8v4H3V6Zm10 0h8v4h-8V6ZM3 14h8v4H3v-4Zm10 0h8v4h-8v-4Z" /></svg>
             <span>New group</span>
           </button>
-          <button className="menu-item" onClick={() => setShowMenu(false)}>
+          <button className="menu-item" onClick={openSavedMessages}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h12a2 2 0 0 1 2 2v16l-4-3H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" /></svg>
             <span>Saved messages</span>
           </button>
-          <button className="menu-item" onClick={() => setShowMenu(false)}>
+          <button className="menu-item" onClick={() => { setShowMenu(false); location.href = '/notifications' }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a5 5 0 0 1 5 5v3l2 2v1H5v-1l2-2V7a5 5 0 0 1 5-5Zm-3 17h6a3 3 0 0 1-6 0Z" /></svg>
             <span>Notifications</span>
           </button>
-          <button className="menu-item" onClick={() => setShowMenu(false)}>
+          <button className="menu-item" onClick={() => { setShowMenu(false); location.href = '/settings' }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a2 2 0 1 1 0-4a2 2 0 0 1 0 4Zm0 7a2 2 0 1 1 0-4a2 2 0 0 1 0 4Zm0 7a2 2 0 1 1 0-4a2 2 0 0 1 0 4Z" /></svg>
             <span>Settings</span>
           </button>
@@ -630,13 +739,34 @@ export default function Chat() {
                 </button>
                 <button className="menu-item danger" onClick={deleteChatForBoth}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7Zm2-4h8l1 3H7l1-3Z" /></svg>
-                  <span>Delete chat</span>
+                  <span>{activePeer?.isGroup ? 'Leave group' : 'Delete chat'}</span>
                 </button>
               </div>
             </aside>
           )}
         </main>
       </div>
+      {showGroupModal && (
+        <div className="modal-backdrop" onClick={() => setShowGroupModal(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="panel-title">New group</div>
+            <div className="auth-form">
+              <label className="field">
+                <span>Group name</span>
+                <input className="input" placeholder="My group" value={groupName} onChange={e => setGroupName(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>Members (usernames, comma separated)</span>
+                <input className="input" placeholder="alice, bob, charlie" value={groupMembers} onChange={e => setGroupMembers(e.target.value)} />
+              </label>
+              <div className="device-actions">
+                <button className="btn primary" onClick={createGroup}>Create</button>
+                <button className="btn ghost" onClick={() => setShowGroupModal(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"

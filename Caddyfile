@@ -4,7 +4,7 @@
 
 {$DOMAIN} {
   @backend {
-    path /auth* /users* /devices* /messages* /admin/* /keys* /me /ws* /files*
+    path /auth* /users* /devices* /messages* /groups* /admin/* /keys* /me /ws* /files*
   }
 
   handle @backend {

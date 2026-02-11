@@ -18,6 +18,12 @@ enum AccountStatus {
   BLOCKED
 }
 
+enum GroupRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
 model User {
   id           String        @id @default(cuid())
   username     String        @unique
@@ -33,6 +39,8 @@ model User {
   files        FileAsset[]   @relation("ownerFiles")
   filesReceived FileAsset[]  @relation("recipientFiles")
   smartKeys    SmartKey[]
+  groupMemberships GroupMember[]
+  groupsOwned  Group[]       @relation("groupOwner")
 }
 
 model Device {
@@ -154,4 +162,27 @@ model SmartKeyLogin {
   approvedByUserId String?
   approvedByKeyId  String?
   issuedJwt        String?
+}
+
+model Group {
+  id        String        @id @default(cuid())
+  name      String
+  ownerId   String
+  createdAt DateTime      @default(now())
+
+  owner     User          @relation("groupOwner", fields: [ownerId], references: [id])
+  members   GroupMember[]
+}
+
+model GroupMember {
+  id        String    @id @default(cuid())
+  groupId   String
+  userId    String
+  role      GroupRole @default(MEMBER)
+  createdAt DateTime  @default(now())
+
+  group     Group     @relation(fields: [groupId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
 }

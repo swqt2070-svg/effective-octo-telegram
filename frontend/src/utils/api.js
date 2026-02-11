@@ -23,6 +23,20 @@ export async function apiPost(path, body, token) {
   return j
 }
 
+export async function apiPatch(path, body, token) {
+  const r = await fetch(API_URL + path, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: 'Bearer ' + token } : {}),
+    },
+    body: JSON.stringify(body || {}),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(j.error || 'request_failed')
+  return j
+}
+
 export async function apiPostForm(path, formData, token) {
   const r = await fetch(API_URL + path, {
     method: 'POST',

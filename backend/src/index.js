@@ -133,6 +133,25 @@ app.post('/auth/login', async (req, res) => {
   return res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role, status: user.status, avatarUrl } });
 });
 
+app.post('/auth/change-password', authMiddleware, async (req, res) => {
+  const schema = z.object({
+    oldPassword: z.string().min(6).max(128),
+    newPassword: z.string().min(8).max(128),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
+
+  const user = await prisma.user.findUnique({ where: { id: req.user.sub } });
+  if (!user) return res.status(404).json({ error: 'user_not_found' });
+
+  const ok = await bcrypt.compare(parsed.data.oldPassword, user.passwordHash);
+  if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
+
+  const passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+  return res.json({ ok: true });
+});
+
 app.get('/me', authMiddleware, async (req, res) => {
   try {
     const u = await ensureActiveUser(req.user.sub);
@@ -314,6 +333,34 @@ app.get('/users/lookup', authMiddleware, async (req, res) => {
   if (!user) return res.status(404).json({ error: 'not_found' });
   const avatarUrl = user.avatarFileId ? fileUrl(user.avatarFileId) : null;
   return res.json({ user: { ...user, avatarUrl } });
+});
+
+// Update profile (username/displayName)
+app.patch('/users/me', authMiddleware, async (req, res) => {
+  const schema = z.object({
+    username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/).optional(),
+    displayName: z.string().min(1).max(64).optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request', details: parsed.error.flatten() });
+
+  const u = await ensureActiveUser(req.user.sub);
+  const data = {};
+  if (parsed.data.username && parsed.data.username !== u.username) {
+    const exists = await prisma.user.findUnique({ where: { username: parsed.data.username } });
+    if (exists) return res.status(409).json({ error: 'username_taken' });
+    data.username = parsed.data.username;
+  }
+  if (parsed.data.displayName !== undefined) data.displayName = parsed.data.displayName;
+  if (Object.keys(data).length === 0) return res.json({ ok: true });
+
+  const updated = await prisma.user.update({
+    where: { id: u.id },
+    data,
+    select: { id: true, username: true, displayName: true, role: true, status: true, avatarFileId: true },
+  });
+  const avatarUrl = updated.avatarFileId ? fileUrl(updated.avatarFileId) : null;
+  return res.json({ user: { ...updated, avatarUrl } });
 });
 
 // Upload avatar (stored on server, not E2E)
@@ -654,6 +701,127 @@ app.get('/messages/pending', authMiddleware, async (req, res) => {
   await prisma.device.update({ where: { id: deviceId }, data: { lastSeenAt: new Date() } });
 
   return res.json({ messages: msgs });
+});
+
+// ===== Groups =====
+async function requireGroupMember(userId, groupId) {
+  const member = await prisma.groupMember.findFirst({ where: { groupId, userId } });
+  if (!member) throw Object.assign(new Error('not_member'), { code: 403 });
+  return member;
+}
+
+app.post('/groups', authMiddleware, async (req, res) => {
+  const schema = z.object({
+    name: z.string().min(1).max(64),
+    memberIds: z.array(z.string().min(10)).max(100).optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request', details: parsed.error.flatten() });
+
+  const u = await ensureActiveUser(req.user.sub);
+  const memberIds = Array.from(new Set((parsed.data.memberIds || []).filter(id => id && id !== u.id)));
+
+  const group = await prisma.group.create({
+    data: {
+      name: parsed.data.name,
+      ownerId: u.id,
+      members: {
+        create: [
+          { userId: u.id, role: 'OWNER' },
+          ...memberIds.map(id => ({ userId: id, role: 'MEMBER' })),
+        ],
+      },
+    },
+    select: { id: true, name: true, createdAt: true },
+  });
+
+  return res.json({ group });
+});
+
+app.get('/groups', authMiddleware, async (req, res) => {
+  await ensureActiveUser(req.user.sub);
+  const groups = await prisma.group.findMany({
+    where: { members: { some: { userId: req.user.sub } } },
+    select: { id: true, name: true, createdAt: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  return res.json({ groups });
+});
+
+app.get('/groups/:id/members', authMiddleware, async (req, res) => {
+  await ensureActiveUser(req.user.sub);
+  const groupId = req.params.id;
+  try {
+    await requireGroupMember(req.user.sub, groupId);
+  } catch (e) {
+    return res.status(e.code || 403).json({ error: e.message || 'not_member' });
+  }
+
+  const members = await prisma.groupMember.findMany({
+    where: { groupId },
+    select: {
+      role: true,
+      user: { select: { id: true, username: true, displayName: true, status: true, avatarFileId: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  const list = members.map(m => ({
+    id: m.user.id,
+    username: m.user.username,
+    displayName: m.user.displayName,
+    status: m.user.status,
+    role: m.role,
+    avatarUrl: m.user.avatarFileId ? fileUrl(m.user.avatarFileId) : null,
+  }));
+  return res.json({ members: list });
+});
+
+app.post('/groups/:id/members', authMiddleware, async (req, res) => {
+  const schema = z.object({ memberIds: z.array(z.string().min(10)).min(1).max(100) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
+
+  await ensureActiveUser(req.user.sub);
+  const groupId = req.params.id;
+  const member = await prisma.groupMember.findFirst({ where: { groupId, userId: req.user.sub } });
+  if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) return res.status(403).json({ error: 'admin_only' });
+
+  const ids = Array.from(new Set(parsed.data.memberIds));
+  await prisma.$transaction(async (tx) => {
+    for (const id of ids) {
+      await tx.groupMember.upsert({
+        where: { groupId_userId: { groupId, userId: id } },
+        create: { groupId, userId: id, role: 'MEMBER' },
+        update: {},
+      });
+    }
+  });
+
+  return res.json({ ok: true });
+});
+
+app.post('/groups/:id/rename', authMiddleware, async (req, res) => {
+  const schema = z.object({ name: z.string().min(1).max(64) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
+
+  await ensureActiveUser(req.user.sub);
+  const groupId = req.params.id;
+  const member = await prisma.groupMember.findFirst({ where: { groupId, userId: req.user.sub } });
+  if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) return res.status(403).json({ error: 'admin_only' });
+
+  const group = await prisma.group.update({ where: { id: groupId }, data: { name: parsed.data.name }, select: { id: true, name: true } });
+  return res.json({ group });
+});
+
+app.post('/groups/:id/leave', authMiddleware, async (req, res) => {
+  await ensureActiveUser(req.user.sub);
+  const groupId = req.params.id;
+  const member = await prisma.groupMember.findFirst({ where: { groupId, userId: req.user.sub } });
+  if (!member) return res.status(404).json({ error: 'not_member' });
+  if (member.role === 'OWNER') return res.status(400).json({ error: 'owner_cannot_leave' });
+  await prisma.groupMember.delete({ where: { id: member.id } });
+  return res.json({ ok: true });
 });
 
 // ===== Admin =====
