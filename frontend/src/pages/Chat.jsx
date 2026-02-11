@@ -87,12 +87,14 @@ export default function Chat() {
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [fileBusy, setFileBusy] = useState(false)
   const [fileUrls, setFileUrls] = useState({})
+  const [replyTo, setReplyTo] = useState(null)
   const [showGroupModal, setShowGroupModal] = useState(false)
   const [groupName, setGroupName] = useState('')
   const [groupMembers, setGroupMembers] = useState('')
   const wsRef = useRef(null)
   const activePeerRef = useRef(null)
   const fileInputRef = useRef(null)
+  const messagesPaneRef = useRef(null)
   const fileUrlCacheRef = useRef(new Map())
 
   const store = useMemo(() => (me && deviceId) ? newStoreForDevice(me.id, deviceId) : null, [me, deviceId])
@@ -120,7 +122,7 @@ export default function Chat() {
   }
 
   useEffect(() => { refreshChats().catch(()=>{}) }, [deviceId])
-  useEffect(() => { setShowInfo(false) }, [activePeer?.peerId])
+  useEffect(() => { setShowInfo(false); setReplyTo(null) }, [activePeer?.peerId])
   useEffect(() => {
     return () => {
       for (const url of fileUrlCacheRef.current.values()) {
@@ -195,6 +197,15 @@ export default function Chat() {
     poll()
     return () => { if (t) clearTimeout(t) }
   }, [token, deviceId, lsStore])
+
+  useEffect(() => {
+    if (!activePeer) return
+    const el = messagesPaneRef.current
+    if (!el) return
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+    })
+  }, [activePeer?.peerId, messages.length])
 
   // WebSocket notify
   useEffect(() => {
@@ -399,20 +410,22 @@ export default function Chat() {
   async function sendMessage(){
     if (!activePeer || !sendText.trim()) return
     const text = sendText.trim()
+    const reply = replyTo ? { ...replyTo } : null
     setSendText('')
+    setReplyTo(null)
     if (activePeer.isGroup) {
-      await sendGroupMessage(activePeer, text)
+      await sendGroupMessage(activePeer, text, reply)
     } else {
-      await sendPayload(activePeer.peerId, { t:'msg', text }, text)
+      await sendPayload(activePeer.peerId, { t:'msg', text, reply }, text)
     }
   }
 
-  async function sendGroupMessage(groupPeer, text){
+  async function sendGroupMessage(groupPeer, text, reply){
     const groupId = groupPeer.groupId
     if (!groupId) return
     const ts = now()
     const groupName = groupPeer.username || 'Group'
-    const payload = { t:'group', groupId, groupName, text, ts }
+    const payload = { t:'group', groupId, groupName, text, ts, reply: reply || undefined }
     const peerId = `group:${groupId}`
 
     await appendMessage(deviceId, peerId, { ...payload, from: me.id, fromUsername: me.username, _ts: ts })
@@ -440,6 +453,7 @@ export default function Chat() {
     if (!activePeer || !fileList?.length) return
     const peerId = activePeer.peerId
     setFileBusy(true)
+    const reply = replyTo ? { ...replyTo } : null
     try{
       for (const file of Array.from(fileList)){
         if (file.size > 50 * 1024 * 1024) {
@@ -457,6 +471,7 @@ export default function Chat() {
         const r = await apiPostForm('/files/upload', fd, token)
         const payload = {
           t: 'file',
+          reply: reply || undefined,
           file: {
             id: r.file.id,
             name: file.name,
@@ -470,6 +485,7 @@ export default function Chat() {
       }
     } finally {
       setFileBusy(false)
+      if (reply) setReplyTo(null)
     }
   }
 
@@ -511,6 +527,12 @@ export default function Chat() {
   const infoTarget = activePeer
     ? { name: activeTitle, id: activeId, role: activePeer?.isGroup ? 'Group' : 'Contact' }
     : (me ? { name: me.username || shortId(me.id), id: me.id, role: 'You' } : null)
+  const replyPreview = (m) => {
+    if (!m) return ''
+    if (m.t === 'file') return `[file] ${m.file?.name || 'file'}`
+    if (m.text) return m.text
+    return ''
+  }
 
   return (
     <div className="app-shell">
@@ -643,16 +665,27 @@ export default function Chat() {
             </div>
           </div>
 
-          <div className="messages-pane">
+          <div className="messages-pane" ref={messagesPaneRef}>
             {!activePeer && <div className="empty-state">Choose a chat on the left.</div>}
             {activePeer && messages.map((m, idx) => {
               const mine = m.from === me.id
               const sys = m.t === 'sys'
               const key = messageKey(m, idx)
+              const reply = m.reply
+              const canReply = !sys
               return (
                 <div key={idx} className={`msg-row ${mine ? 'out' : 'in'} ${sys ? 'sys' : ''}`}>
                   {m.t === 'file' ? (
-                    <div className={`bubble ${mine ? 'bubble-out' : 'bubble-in'}`}>
+                    <div
+                      className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${canReply ? 'replyable' : ''}`}
+                      onClick={() => { if (canReply) setReplyTo({ from: m.from, fromUsername: m.fromUsername, text: replyPreview(m), ts: m._ts || m.ts || now() }) }}
+                    >
+                      {reply && (
+                        <div className="reply-chip">
+                          <div className="reply-author">{reply.fromUsername || shortId(reply.from)}</div>
+                          <div className="reply-text">{reply.text || ''}</div>
+                        </div>
+                      )}
                       <div className="file-card">
                         <div className="file-meta">
                           <div className="file-name">{m.file?.name || 'file'}</div>
@@ -681,7 +714,16 @@ export default function Chat() {
                       <div className="bubble-time">{formatTime(m._ts||m.ts||now())}</div>
                     </div>
                   ) : (
-                    <div className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${sys ? 'bubble-sys' : ''}`}>
+                    <div
+                      className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${sys ? 'bubble-sys' : ''} ${canReply ? 'replyable' : ''}`}
+                      onClick={() => { if (canReply) setReplyTo({ from: m.from, fromUsername: m.fromUsername, text: replyPreview(m), ts: m._ts || m.ts || now() }) }}
+                    >
+                      {reply && (
+                        <div className="reply-chip">
+                          <div className="reply-author">{reply.fromUsername || shortId(reply.from)}</div>
+                          <div className="reply-text">{reply.text || ''}</div>
+                        </div>
+                      )}
                       <div className="bubble-text">{m.text}</div>
                       <div className="bubble-time">{formatTime(m._ts||m.ts||now())}</div>
                     </div>
@@ -699,6 +741,18 @@ export default function Chat() {
             </div>
           )}
 
+          {replyTo && (
+            <div className="reply-bar">
+              <div className="reply-line" />
+              <div className="reply-content">
+                <div className="reply-author">{replyTo.fromUsername || shortId(replyTo.from) || 'Unknown'}</div>
+                <div className="reply-text">{replyTo.text || ''}</div>
+              </div>
+              <button className="icon-btn ghost reply-cancel" onClick={() => setReplyTo(null)} title="Cancel reply">
+                <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6l-12 12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
+              </button>
+            </div>
+          )}
           <div className="composer">
             <div className="composer-actions">
               <button className="icon-btn ghost" title="Attach" onClick={() => fileInputRef.current?.click()} disabled={!activePeer || fileBusy}>

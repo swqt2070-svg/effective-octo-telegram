@@ -146,6 +146,7 @@ a:hover { text-decoration: underline; }
   grid-template-columns: 72px 320px 1fr;
   gap: 12px;
   padding: 16px;
+  min-height: 0;
 }
 
 .panel {
@@ -201,6 +202,7 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   padding: 16px;
   gap: 12px;
+  min-height: 0;
 }
 .chat-list-top {
   display: flex;
@@ -255,6 +257,7 @@ a:hover { text-decoration: underline; }
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
 }
 
 .chat-item {
@@ -295,6 +298,7 @@ a:hover { text-decoration: underline; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .chat-header {
@@ -336,6 +340,7 @@ a:hover { text-decoration: underline; }
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
 }
 
 .file-card {
@@ -367,6 +372,8 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--stroke);
   background: rgba(11, 20, 32, 0.8);
 }
+.bubble.replyable { cursor: pointer; }
+.bubble.replyable:hover { box-shadow: 0 0 0 1px rgba(76, 201, 240, 0.3); }
 
 .bubble-out {
   background: linear-gradient(135deg, rgba(58, 124, 255, 0.9), rgba(30, 99, 255, 0.9));
@@ -384,6 +391,59 @@ a:hover { text-decoration: underline; }
   color: rgba(230, 237, 245, 0.7);
   text-align: right;
 }
+
+.reply-chip {
+  border-left: 3px solid rgba(76, 201, 240, 0.8);
+  background: rgba(9, 16, 26, 0.6);
+  padding: 6px 8px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+.reply-chip .reply-author {
+  font-size: 12px;
+  font-weight: 600;
+}
+.reply-chip .reply-text {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--stroke);
+  background: rgba(10, 18, 28, 0.6);
+}
+.reply-line {
+  width: 3px;
+  height: 32px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+}
+.reply-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.reply-content .reply-author {
+  font-size: 12px;
+  font-weight: 600;
+}
+.reply-content .reply-text {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reply-cancel { width: 32px; height: 32px; }
 
 .composer {
   padding: 14px;
