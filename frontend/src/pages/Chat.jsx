@@ -574,6 +574,7 @@ export default function Chat() {
     if (m.text) return m.text
     return ''
   }
+  const meId = me?.id || ''
   const hitSet = useMemo(() => new Set(searchHits), [searchHits])
   const renderedMessages = []
   let lastDayKey = ''
@@ -587,7 +588,7 @@ export default function Chat() {
       )
       lastDayKey = dayKey
     }
-    const mine = m?.from === me.id
+    const mine = m?.from === meId
     const sys = m?.t === 'sys'
     const reply = m?.reply
     const canReply = !sys
