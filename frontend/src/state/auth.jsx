@@ -24,6 +24,12 @@ export function AuthProvider({ children }) {
     me,
     setToken: (t) => { setToken(t); if (t) setLocal('token', t); else delLocal('token') },
     logout: () => { setToken(''); delLocal('token'); setMe(null); },
+    refreshMe: async () => {
+      if (!token) return null
+      const u = await apiGet('/me', token)
+      setMe(u)
+      return u
+    },
   }), [token, me])
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>

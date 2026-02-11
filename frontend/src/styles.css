@@ -95,6 +95,7 @@ a:hover { text-decoration: underline; }
   background: linear-gradient(135deg, #1d4ed8, #38bdf8);
   font-weight: 700;
   font-size: 12px;
+  overflow: hidden;
 }
 
 .user-meta { display: flex; flex-direction: column; line-height: 1.1; }
@@ -280,6 +281,7 @@ a:hover { text-decoration: underline; }
   place-items: center;
   background: linear-gradient(135deg, #1d4ed8, #38bdf8);
   font-weight: 700;
+  overflow: hidden;
 }
 
 .chat-item-main { flex: 1; display: flex; flex-direction: column; gap: 6px; }
@@ -325,6 +327,7 @@ a:hover { text-decoration: underline; }
 .icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
 .icon-btn.ghost { background: rgba(9, 16, 26, 0.7); }
 .icon-btn.ghost:hover { border-color: #2a3c52; color: #fff; }
+.icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .messages-pane {
   flex: 1;
@@ -333,6 +336,22 @@ a:hover { text-decoration: underline; }
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.file-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.file-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.file-name { font-weight: 600; font-size: 14px; }
+.file-size { font-size: 12px; color: var(--muted); }
+.file-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.file-preview {
+  margin-top: 8px;
+  max-width: 280px;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
 }
 
 .msg-row { display: flex; }
@@ -375,6 +394,30 @@ a:hover { text-decoration: underline; }
 }
 .composer-actions { display: flex; gap: 8px; }
 .composer .input { flex: 1; }
+
+.emoji-pop {
+  position: absolute;
+  bottom: 76px;
+  left: 120px;
+  background: rgba(14, 23, 35, 0.95);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(6, 32px);
+  gap: 6px;
+  z-index: 25;
+}
+.emoji-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: rgba(9, 16, 26, 0.7);
+  cursor: pointer;
+  font-size: 18px;
+}
+.emoji-btn:hover { border-color: #2a3c52; }
 
 .inline-error {
   color: var(--danger);
@@ -429,6 +472,13 @@ a:hover { text-decoration: underline; }
   place-items: center;
   background: linear-gradient(135deg, #1d4ed8, #38bdf8);
   font-weight: 700;
+  overflow: hidden;
+}
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 .menu-name { font-weight: 700; }
 .menu-id { color: var(--muted); font-size: 12px; }
@@ -586,6 +636,7 @@ a:hover { text-decoration: underline; }
   .nav-rail { display: none; }
   .chat-list { order: 1; }
   .chat-main { order: 2; }
+  .emoji-pop { left: 16px; bottom: 96px; }
   .menu-drawer {
     top: 60px;
     left: 12px;

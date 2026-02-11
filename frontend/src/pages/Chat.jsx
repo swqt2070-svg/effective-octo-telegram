@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import TopBar from '../components/TopBar.jsx'
 import { useAuth } from '../state/auth.jsx'
-import { apiGet, apiPost, API_URL } from '../utils/api.js'
-import { getLocal } from '../utils/local.js'
+import { apiGet, apiPost, apiPostForm, apiGetBuffer, API_URL } from '../utils/api.js'
 import { listChats, upsertChat, loadMessages, appendMessage } from '../utils/chatStore.js'
 import { newStoreForDevice, makeLibSignalStore, makeAddress, buildSessionFromBundle, encryptToAddress, decryptFromAddress } from '../signal/signal.js'
 import { ensureDeviceSetup } from '../utils/deviceSetup.js'
+import { aesGcmEncrypt, aesGcmDecrypt } from '../utils/crypto.js'
 
 function now(){ return Date.now() }
 function shortId(s){
@@ -54,8 +54,25 @@ function extractBodyB64(packed) {
   return null
 }
 
+function formatSize(bytes) {
+  if (!bytes && bytes !== 0) return ''
+  const units = ['B', 'KB', 'MB', 'GB']
+  let v = bytes
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i += 1
+  }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+function messageKey(m, idx) {
+  if (m?.file?.id) return `${m.file.id}:${m._ts || m.ts || idx}`
+  return `${m?._ts || m?.ts || idx}:${m?.from || ''}`
+}
+
 export default function Chat() {
-  const { token, me, logout } = useAuth()
+  const { token, me, logout, refreshMe } = useAuth()
   const [deviceId, setDeviceId] = useState('')
   const [chats, setChats] = useState([])
   const [activePeer, setActivePeer] = useState(null) // {peerId, username, displayName}
@@ -65,8 +82,14 @@ export default function Chat() {
   const [sendText, setSendText] = useState('')
   const [showMenu, setShowMenu] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const [fileBusy, setFileBusy] = useState(false)
+  const [fileUrls, setFileUrls] = useState({})
   const wsRef = useRef(null)
   const activePeerRef = useRef(null)
+  const avatarInputRef = useRef(null)
+  const fileInputRef = useRef(null)
+  const fileUrlCacheRef = useRef(new Map())
 
   const store = useMemo(() => (me && deviceId) ? newStoreForDevice(me.id, deviceId) : null, [me, deviceId])
   const lsStore = useMemo(() => store ? makeLibSignalStore(store) : null, [store])
@@ -94,6 +117,14 @@ export default function Chat() {
 
   useEffect(() => { refreshChats().catch(()=>{}) }, [deviceId])
   useEffect(() => { setShowInfo(false) }, [activePeer?.peerId])
+  useEffect(() => {
+    return () => {
+      for (const url of fileUrlCacheRef.current.values()) {
+        try { URL.revokeObjectURL(url) } catch {}
+      }
+      fileUrlCacheRef.current.clear()
+    }
+  }, [])
 
   useEffect(() => {
     let t
@@ -182,9 +213,9 @@ export default function Chat() {
     try{
       const r = await apiGet(`/users/lookup?q=${encodeURIComponent(q)}`, token)
       const u = r.user
-      const peer = { peerId: u.id, username: u.username, displayName: u.displayName }
+      const peer = { peerId: u.id, username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl || '' }
       setActivePeer(peer)
-      await upsertChat(deviceId, { peerId: u.id, title: u.username, lastText: '', lastTs: 0 })
+      await upsertChat(deviceId, { peerId: u.id, title: u.username, lastText: '', lastTs: 0, avatarUrl: u.avatarUrl || '' })
       const msgs = await loadMessages(deviceId, u.id)
       setMessages(msgs)
       await refreshChats()
@@ -196,45 +227,106 @@ export default function Chat() {
 
   async function openChat(peerId){
     const c = chats.find(x => x.peerId === peerId)
-    const peer = { peerId, username: c?.title || peerId, displayName: '' }
+    const peer = { peerId, username: c?.title || peerId, displayName: '', avatarUrl: c?.avatarUrl || '' }
     setActivePeer(peer)
     const msgs = await loadMessages(deviceId, peerId)
     setMessages(msgs)
+  }
+
+  async function sendPayload(peerId, payload, previewText){
+    const ts = payload.ts || now()
+    const full = { ...payload, ts, from: me.id, fromUsername: me.username, _ts: ts }
+
+    await appendMessage(deviceId, peerId, full)
+    await upsertChat(deviceId, {
+      peerId,
+      title: activePeer?.username || peerId,
+      lastText: previewText || payload.text || '(msg)',
+      lastTs: ts,
+      avatarUrl: activePeer?.avatarUrl || ''
+    })
+    await refreshChats(peerId)
+
+    try{
+      const devs = await apiGet(`/users/${encodeURIComponent(peerId)}/devices`, token)
+      const envelopes = []
+      for (const d of devs.devices){
+        const b = await apiGet(`/keys/bundle?userId=${encodeURIComponent(peerId)}&deviceId=${encodeURIComponent(d.id)}`, token)
+        const addr = makeAddress(peerId, d.id)
+        await buildSessionFromBundle(lsStore, addr, b.bundle)
+        const enc = await encryptToAddress(lsStore, addr, full)
+        const packed = btoa(JSON.stringify({ type: enc.type, bodyB64: enc.bodyB64 }))
+        envelopes.push({ recipientDeviceId: d.id, ciphertext: packed })
+      }
+      await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: peerId, envelopes }, token)
+    }catch(ex){
+      await appendMessage(deviceId, peerId, { t:'sys', text:'[send failed] ' + ex.message, ts: now(), _ts: now() })
+      await refreshChats(peerId)
+    }
   }
 
   async function sendMessage(){
     if (!activePeer || !sendText.trim()) return
     const text = sendText.trim()
     setSendText('')
+    await sendPayload(activePeer.peerId, { t:'msg', text }, text)
+  }
+
+  async function sendFiles(fileList){
+    if (!activePeer || !fileList?.length) return
     const peerId = activePeer.peerId
-    const ts = now()
-
-    // optimistic local store
-    await appendMessage(deviceId, peerId, { t:'msg', text, ts, from: me.id, fromUsername: me.username, _ts: ts })
-    await upsertChat(deviceId, { peerId, title: activePeer.username || peerId, lastText: text, lastTs: ts })
-    await refreshChats()
-
-    // E2E: encrypt to each recipient device
+    setFileBusy(true)
     try{
-      const devs = await apiGet(`/users/${encodeURIComponent(peerId)}/devices`, token)
-      const envelopes = []
-      for (const d of devs.devices){
-        // fetch prekey bundle
-        const b = await apiGet(`/keys/bundle?userId=${encodeURIComponent(peerId)}&deviceId=${encodeURIComponent(d.id)}`, token)
-        const addr = makeAddress(peerId, d.id)
-        // ensure session exists by processing bundle (idempotent-ish)
-        await buildSessionFromBundle(lsStore, addr, b.bundle)
-        const enc = await encryptToAddress(lsStore, addr, { t:'msg', text, ts, from: me.id, fromUsername: me.username })
-        const packed = btoa(JSON.stringify({ type: enc.type, bodyB64: enc.bodyB64 }))
-        console.log('send packed', { len: packed.length, sample: packed.slice(0, 80) })
-        envelopes.push({ recipientDeviceId: d.id, ciphertext: packed })
+      for (const file of Array.from(fileList)){
+        if (file.size > 50 * 1024 * 1024) {
+          await appendMessage(deviceId, peerId, { t:'sys', text:`[file too large] ${file.name}`, ts: now(), _ts: now() })
+          continue
+        }
+        const buf = await file.arrayBuffer()
+        const enc = await aesGcmEncrypt(buf)
+        const fd = new FormData()
+        fd.append('file', new Blob([enc.cipherBuf], { type: 'application/octet-stream' }), 'payload.bin')
+        fd.append('recipientUserId', peerId)
+        fd.append('kind', 'MESSAGE')
+        fd.append('originalName', file.name)
+        fd.append('mime', file.type || 'application/octet-stream')
+        const r = await apiPostForm('/files/upload', fd, token)
+        const payload = {
+          t: 'file',
+          file: {
+            id: r.file.id,
+            name: file.name,
+            mime: file.type || 'application/octet-stream',
+            size: file.size,
+            key: enc.keyB64,
+            iv: enc.ivB64,
+          }
+        }
+        await sendPayload(peerId, payload, `[file] ${file.name}`)
       }
-      await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: peerId, envelopes }, token)
-    }catch(ex){
-      // store a local error marker
-      await appendMessage(deviceId, peerId, { t:'sys', text:'[send failed] ' + ex.message, ts: now(), _ts: now() })
-      await refreshChats()
+    } finally {
+      setFileBusy(false)
     }
+  }
+
+  async function ensureFileUrl(m, idx){
+    const key = messageKey(m, idx)
+    if (fileUrlCacheRef.current.has(key)) return fileUrlCacheRef.current.get(key)
+    const data = await apiGetBuffer(`/files/${m.file.id}`, token)
+    const plain = await aesGcmDecrypt(data, m.file.key, m.file.iv)
+    const blob = new Blob([plain], { type: m.file.mime || 'application/octet-stream' })
+    const url = URL.createObjectURL(blob)
+    fileUrlCacheRef.current.set(key, url)
+    setFileUrls(prev => ({ ...prev, [key]: url }))
+    return url
+  }
+
+  async function handleAvatarUpload(file){
+    if (!file) return
+    const fd = new FormData()
+    fd.append('file', file)
+    await apiPostForm('/users/me/avatar', fd, token)
+    await refreshMe()
   }
 
   if (!deviceId) {
@@ -257,10 +349,14 @@ export default function Chat() {
   }
 
   const meInitial = me?.username ? me.username.slice(0, 1).toUpperCase() : 'U'
+  const meAvatar = me?.avatarUrl || ''
   const activeTitle = activePeer ? (activePeer.username || shortId(activePeer.peerId)) : 'Select a chat'
   const activeId = activePeer?.peerId || ''
   const activeInitial = activePeer?.username ? activePeer.username.slice(0, 1).toUpperCase() : shortId(activeId).slice(0, 1).toUpperCase()
-  const infoTarget = activePeer ? { name: activeTitle, id: activeId, role: 'Contact' } : (me ? { name: me.username || shortId(me.id), id: me.id, role: 'You' } : null)
+  const activeAvatar = activePeer?.avatarUrl || ''
+  const infoTarget = activePeer
+    ? { name: activeTitle, id: activeId, role: 'Contact', avatarUrl: activeAvatar }
+    : (me ? { name: me.username || shortId(me.id), id: me.id, role: 'You', avatarUrl: meAvatar } : null)
 
   return (
     <div className="app-shell">
@@ -268,7 +364,11 @@ export default function Chat() {
       <div className={`menu-backdrop ${showMenu ? 'show' : ''}`} onClick={() => setShowMenu(false)} />
       <aside className={`menu-drawer ${showMenu ? 'open' : ''}`}>
         <div className="menu-profile">
-          <div className="avatar-lg">{meInitial}</div>
+          {meAvatar ? (
+            <img className="avatar-img avatar-lg" src={meAvatar} alt="avatar" />
+          ) : (
+            <div className="avatar-lg">{meInitial}</div>
+          )}
           <div>
             <div className="menu-name">{me?.username || 'User'}</div>
             <div className="menu-id">{me?.id ? shortId(me.id) : 'No id'}</div>
@@ -278,6 +378,10 @@ export default function Chat() {
           <button className="menu-item" onClick={() => { setShowMenu(false); setShowInfo(true) }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0-4-4a4 4 0 0 0 4 4Zm0 2c-4.4 0-8 2-8 4.5V21h16v-2.5c0-2.5-3.6-4.5-8-4.5Z" /></svg>
             <span>My profile</span>
+          </button>
+          <button className="menu-item" onClick={() => avatarInputRef.current?.click()}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h4l2-2h4l2 2h4v12H4V7Zm8 3a4 4 0 1 0 0 8a4 4 0 0 0 0-8Z" /></svg>
+            <span>Change avatar</span>
           </button>
           <button className="menu-item" onClick={() => setShowMenu(false)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8v4H3V6Zm10 0h8v4h-8V6ZM3 14h8v4H3v-4Zm10 0h8v4h-8v-4Z" /></svg>
@@ -294,6 +398,10 @@ export default function Chat() {
           <button className="menu-item" onClick={() => setShowMenu(false)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a2 2 0 1 1 0-4a2 2 0 0 1 0 4Zm0 7a2 2 0 1 1 0-4a2 2 0 0 1 0 4Zm0 7a2 2 0 1 1 0-4a2 2 0 0 1 0 4Z" /></svg>
             <span>Settings</span>
+          </button>
+          <button className="menu-item" onClick={() => { setShowMenu(false); location.href = '/smartkey' }}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h9a4 4 0 1 1 0 8h-2v-2h2a2 2 0 1 0 0-4H4v-2Zm0 4h7v2H4v-2Zm11-8a3 3 0 0 0-6 0v2h2V7a1 1 0 1 1 2 0v2h2V7Z" /></svg>
+            <span>Smart key</span>
           </button>
         </div>
         <div className="menu-divider" />
@@ -353,7 +461,11 @@ export default function Chat() {
               const lastTs = c.lastTs || 0
               return (
                 <button key={c.peerId} onClick={()=>openChat(c.peerId)} className={`chat-item ${isActive ? 'active' : ''}`}>
-                  <div className="avatar">{(title || 'U').slice(0,1).toUpperCase()}</div>
+                  {c.avatarUrl ? (
+                    <img className="avatar-img avatar" src={c.avatarUrl} alt="avatar" />
+                  ) : (
+                    <div className="avatar">{(title || 'U').slice(0,1).toUpperCase()}</div>
+                  )}
                   <div className="chat-item-main">
                     <div className="chat-item-top">
                       <div className="chat-title">{title}</div>
@@ -373,7 +485,11 @@ export default function Chat() {
         <main className="chat-main panel">
           <div className="chat-header">
             <div className="chat-header-left">
-              <div className={`avatar ${activePeer ? '' : 'muted'}`}>{activePeer ? activeInitial : '?'}</div>
+              {activeAvatar ? (
+                <img className="avatar-img avatar" src={activeAvatar} alt="avatar" />
+              ) : (
+                <div className={`avatar ${activePeer ? '' : 'muted'}`}>{activePeer ? activeInitial : '?'}</div>
+              )}
               <div className="chat-header-title">
                 <div className="chat-name">{activeTitle}</div>
                 {activePeer && <div className="chat-sub">{activeId}</div>}
@@ -394,23 +510,63 @@ export default function Chat() {
             {activePeer && messages.map((m, idx) => {
               const mine = m.from === me.id
               const sys = m.t === 'sys'
+              const key = messageKey(m, idx)
               return (
                 <div key={idx} className={`msg-row ${mine ? 'out' : 'in'} ${sys ? 'sys' : ''}`}>
-                  <div className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${sys ? 'bubble-sys' : ''}`}>
-                    <div className="bubble-text">{m.text}</div>
-                    <div className="bubble-time">{formatTime(m._ts||m.ts||now())}</div>
-                  </div>
+                  {m.t === 'file' ? (
+                    <div className={`bubble ${mine ? 'bubble-out' : 'bubble-in'}`}>
+                      <div className="file-card">
+                        <div className="file-meta">
+                          <div className="file-name">{m.file?.name || 'file'}</div>
+                          <div className="file-size">{formatSize(m.file?.size)}</div>
+                        </div>
+                        <div className="file-actions">
+                          {fileUrls[key] ? (
+                            <button className="pill" onClick={() => window.open(fileUrls[key], '_blank')}>Open</button>
+                          ) : (
+                            <button className="pill" onClick={() => ensureFileUrl(m, idx).catch(() => {})}>Decrypt</button>
+                          )}
+                          <button className="pill" onClick={async () => {
+                            try {
+                              const url = fileUrls[key] || await ensureFileUrl(m, idx)
+                              const a = document.createElement('a')
+                              a.href = url
+                              a.download = m.file?.name || 'file'
+                              a.click()
+                            } catch {}
+                          }}>Download</button>
+                        </div>
+                        {fileUrls[key] && m.file?.mime?.startsWith('image/') && (
+                          <img className="file-preview" src={fileUrls[key]} alt={m.file?.name || 'image'} />
+                        )}
+                      </div>
+                      <div className="bubble-time">{formatTime(m._ts||m.ts||now())}</div>
+                    </div>
+                  ) : (
+                    <div className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${sys ? 'bubble-sys' : ''}`}>
+                      <div className="bubble-text">{m.text}</div>
+                      <div className="bubble-time">{formatTime(m._ts||m.ts||now())}</div>
+                    </div>
+                  )}
                 </div>
               )
             })}
           </div>
 
+          {emojiOpen && (
+            <div className="emoji-pop">
+              {['😀','😂','😍','👍','🔥','🎉','😅','😎','🤝','🙏','❤️','😴'].map(em => (
+                <button key={em} className="emoji-btn" onClick={() => { setSendText(t => t + em); setEmojiOpen(false) }}>{em}</button>
+              ))}
+            </div>
+          )}
+
           <div className="composer">
             <div className="composer-actions">
-              <button className="icon-btn ghost" title="Attach">
+              <button className="icon-btn ghost" title="Attach" onClick={() => fileInputRef.current?.click()} disabled={!activePeer || fileBusy}>
                 <svg viewBox="0 0 24 24"><path d="M7 7.5V16a5 5 0 0 0 10 0V6a3.5 3.5 0 0 0-7 0v9a2 2 0 0 0 4 0V7.5h-1.8V15a.2.2 0 0 1-.4 0V6a1.7 1.7 0 1 1 3.4 0v10a3.2 3.2 0 0 1-6.4 0V7.5H7Z"/></svg>
               </button>
-              <button className="icon-btn ghost" title="Emoji">
+              <button className="icon-btn ghost" title="Emoji" onClick={() => setEmojiOpen(!emojiOpen)}>
                 <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20a10 10 0 0 0 0-20Zm-4 8a1 1 0 1 1 2 0a1 1 0 0 1-2 0Zm7 0a1 1 0 1 1 2 0a1 1 0 0 1-2 0Zm-7.5 4.5h9a4.5 4.5 0 0 1-9 0Z"/></svg>
               </button>
             </div>
@@ -422,7 +578,11 @@ export default function Chat() {
             <aside className={`info-drawer ${showInfo ? 'open' : ''}`}>
               <div className="info-head">
                 <div className="info-head-main">
-                  <div className="avatar-lg">{infoTarget.name.slice(0, 1).toUpperCase()}</div>
+                  {infoTarget.avatarUrl ? (
+                    <img className="avatar-img avatar-lg" src={infoTarget.avatarUrl} alt="avatar" />
+                  ) : (
+                    <div className="avatar-lg">{infoTarget.name.slice(0, 1).toUpperCase()}</div>
+                  )}
                   <div>
                     <div className="info-name">{infoTarget.name}</div>
                     <div className="info-sub">{infoTarget.role}</div>
@@ -452,6 +612,28 @@ export default function Chat() {
           )}
         </main>
       </div>
+      <input
+        ref={avatarInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const file = e.target.files?.[0]
+          if (file) await handleAvatarUpload(file)
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const files = e.target.files
+          if (files && files.length) await sendFiles(files)
+          e.target.value = ''
+        }}
+      />
     </div>
   )
 }

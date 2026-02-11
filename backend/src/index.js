@@ -3,10 +3,13 @@ import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import fs from 'node:fs';
+import path from 'node:path';
 import { nanoid } from 'nanoid';
 import { WebSocketServer } from 'ws';
 import { PrismaClient, AccountStatus, UserRole } from '@prisma/client';
 import { z } from 'zod';
+import multer from 'multer';
 
 const prisma = new PrismaClient();
 
@@ -14,6 +17,14 @@ const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
 const QR_TTL_SECONDS = Number(process.env.QR_TTL_SECONDS || 180);
+const SMARTKEY_BIND_TTL_SECONDS = Number(process.env.SMARTKEY_BIND_TTL_SECONDS || 300);
+const SMARTKEY_LOGIN_TTL_SECONDS = Number(process.env.SMARTKEY_LOGIN_TTL_SECONDS || 180);
+const MAX_FILE_MB = Number(process.env.MAX_FILE_MB || 50);
+const MAX_FILE_SIZE = MAX_FILE_MB * 1024 * 1024;
+const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads';
+
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const upload = multer({ dest: UPLOAD_DIR, limits: { fileSize: MAX_FILE_SIZE } });
 
 const app = express();
 app.use(cors({ origin: CORS_ORIGIN, credentials: true }));
@@ -22,6 +33,11 @@ app.use(express.json({ limit: '2mb' }));
 function signJwt(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
 }
+
+function fileUrl(id) {
+  return `/files/${id}`;
+}
+
 
 function authMiddleware(req, res, next) {
   const hdr = req.headers.authorization || '';
@@ -81,7 +97,7 @@ app.post('/auth/register', async (req, res) => {
 
   const user = await prisma.user.create({
     data: { username, displayName, passwordHash, role },
-    select: { id: true, username: true, displayName: true, role: true, status: true },
+    select: { id: true, username: true, displayName: true, role: true, status: true, avatarFileId: true },
   });
 
   if (userCount > 0) {
@@ -92,7 +108,8 @@ app.post('/auth/register', async (req, res) => {
   }
 
   const token = signJwt({ sub: user.id, username: user.username, role: user.role });
-  return res.json({ token, user });
+  const avatarUrl = user.avatarFileId ? fileUrl(user.avatarFileId) : null;
+  return res.json({ token, user: { ...user, avatarUrl } });
 });
 
 app.post('/auth/login', async (req, res) => {
@@ -112,13 +129,15 @@ app.post('/auth/login', async (req, res) => {
   if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
 
   const token = signJwt({ sub: user.id, username: user.username, role: user.role });
-  return res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role, status: user.status } });
+  const avatarUrl = user.avatarFileId ? fileUrl(user.avatarFileId) : null;
+  return res.json({ token, user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role, status: user.status, avatarUrl } });
 });
 
 app.get('/me', authMiddleware, async (req, res) => {
   try {
     const u = await ensureActiveUser(req.user.sub);
-    return res.json({ id: u.id, username: u.username, displayName: u.displayName, role: u.role, status: u.status });
+    const avatarUrl = u.avatarFileId ? fileUrl(u.avatarFileId) : null;
+    return res.json({ id: u.id, username: u.username, displayName: u.displayName, role: u.role, status: u.status, avatarUrl });
   } catch (e) {
     return res.status(e.code || 500).json({ error: e.message || 'error' });
   }
@@ -174,6 +193,114 @@ app.get('/auth/qr/status', async (req, res) => {
   return res.json({ status: 'PENDING' });
 });
 
+// ===== Smart Key =====
+app.post('/auth/smartkey/bind-request', authMiddleware, async (req, res) => {
+  const token = nanoid(32);
+  const expiresAt = new Date(Date.now() + SMARTKEY_BIND_TTL_SECONDS * 1000);
+  await prisma.smartKeyBind.create({ data: { token, userId: req.user.sub, expiresAt } });
+  return res.json({ token, expiresAt: expiresAt.toISOString() });
+});
+
+app.post('/auth/smartkey/bind', async (req, res) => {
+  const schema = z.object({
+    token: z.string().min(10),
+    secretHash: z.string().min(32),
+    deviceName: z.string().max(64).optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
+
+  const { token, secretHash, deviceName } = parsed.data;
+  const bind = await prisma.smartKeyBind.findUnique({ where: { token } });
+  if (!bind) return res.status(404).json({ error: 'bind_not_found' });
+  if (bind.expiresAt < new Date()) {
+    await prisma.smartKeyBind.delete({ where: { token } }).catch(() => {});
+    return res.status(400).json({ error: 'bind_expired' });
+  }
+
+  let key
+  try {
+    key = await prisma.smartKey.create({
+      data: { userId: bind.userId, secretHash, deviceName },
+      select: { id: true, deviceName: true, createdAt: true },
+    });
+  } catch {
+    return res.status(409).json({ error: 'key_exists' });
+  }
+  await prisma.smartKeyBind.delete({ where: { token } }).catch(() => {});
+  return res.json({ ok: true, key });
+});
+
+app.get('/auth/smartkey/list', authMiddleware, async (req, res) => {
+  const keys = await prisma.smartKey.findMany({
+    where: { userId: req.user.sub },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, deviceName: true, createdAt: true, lastUsedAt: true },
+  });
+  return res.json({ keys });
+});
+
+app.post('/auth/smartkey/revoke', authMiddleware, async (req, res) => {
+  const schema = z.object({ id: z.string().min(10) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
+  const key = await prisma.smartKey.findFirst({ where: { id: parsed.data.id, userId: req.user.sub } });
+  if (!key) return res.status(404).json({ error: 'key_not_found' });
+  await prisma.smartKey.delete({ where: { id: key.id } });
+  return res.json({ ok: true });
+});
+
+app.post('/auth/smartkey/login-request', async (req, res) => {
+  const token = nanoid(32);
+  const expiresAt = new Date(Date.now() + SMARTKEY_LOGIN_TTL_SECONDS * 1000);
+  await prisma.smartKeyLogin.create({ data: { token, expiresAt } });
+  return res.json({ token, expiresAt: expiresAt.toISOString() });
+});
+
+app.post('/auth/smartkey/approve', async (req, res) => {
+  const schema = z.object({
+    token: z.string().min(10),
+    secretHash: z.string().min(32),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
+
+  const { token, secretHash } = parsed.data;
+  const login = await prisma.smartKeyLogin.findUnique({ where: { token } });
+  if (!login) return res.status(404).json({ error: 'login_not_found' });
+  if (login.expiresAt < new Date()) {
+    await prisma.smartKeyLogin.update({ where: { token }, data: { status: 'EXPIRED' } });
+    return res.status(400).json({ error: 'login_expired' });
+  }
+  if (login.status === 'APPROVED' && login.issuedJwt) return res.json({ ok: true });
+
+  const key = await prisma.smartKey.findFirst({ where: { secretHash } });
+  if (!key) return res.status(403).json({ error: 'invalid_key' });
+
+  const u = await ensureActiveUser(key.userId);
+  const issuedJwt = signJwt({ sub: u.id, username: u.username, role: u.role });
+
+  await prisma.smartKeyLogin.update({
+    where: { token },
+    data: { status: 'APPROVED', approvedByUserId: u.id, approvedByKeyId: key.id, issuedJwt },
+  });
+  await prisma.smartKey.update({ where: { id: key.id }, data: { lastUsedAt: new Date() } });
+  return res.json({ ok: true });
+});
+
+app.get('/auth/smartkey/status', async (req, res) => {
+  const token = String(req.query.token || '');
+  if (!token) return res.status(400).json({ error: 'missing_token' });
+  const login = await prisma.smartKeyLogin.findUnique({ where: { token } });
+  if (!login) return res.status(404).json({ error: 'login_not_found' });
+  if (login.expiresAt < new Date() && login.status !== 'APPROVED') {
+    await prisma.smartKeyLogin.update({ where: { token }, data: { status: 'EXPIRED' } });
+    return res.json({ status: 'EXPIRED' });
+  }
+  if (login.status === 'APPROVED') return res.json({ status: 'APPROVED', token: login.issuedJwt });
+  return res.json({ status: 'PENDING' });
+});
+
 // ===== User search =====
 app.get('/users/lookup', authMiddleware, async (req, res) => {
   await ensureActiveUser(req.user.sub);
@@ -182,10 +309,91 @@ app.get('/users/lookup', authMiddleware, async (req, res) => {
 
   const user = await prisma.user.findFirst({
     where: { OR: [{ username: q }, { id: q }] },
-    select: { id: true, username: true, displayName: true, status: true },
+    select: { id: true, username: true, displayName: true, status: true, avatarFileId: true },
   });
   if (!user) return res.status(404).json({ error: 'not_found' });
-  return res.json({ user });
+  const avatarUrl = user.avatarFileId ? fileUrl(user.avatarFileId) : null;
+  return res.json({ user: { ...user, avatarUrl } });
+});
+
+// Upload avatar (stored on server, not E2E)
+app.post('/users/me/avatar', authMiddleware, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'missing_file' });
+  const u = await ensureActiveUser(req.user.sub);
+  const mime = req.file.mimetype || 'application/octet-stream';
+  if (!mime.startsWith('image/')) {
+    try { fs.unlinkSync(req.file.path); } catch {}
+    return res.status(400).json({ error: 'avatar_must_be_image' });
+  }
+
+  const file = await prisma.fileAsset.create({
+    data: {
+      ownerUserId: u.id,
+      kind: 'AVATAR',
+      originalName: req.file.originalname,
+      mime,
+      size: req.file.size,
+      storagePath: req.file.path,
+    }
+  });
+
+  await prisma.user.update({ where: { id: u.id }, data: { avatarFileId: file.id } });
+
+  return res.json({ ok: true, avatarUrl: fileUrl(file.id) });
+});
+
+// Upload encrypted files for messages
+app.post('/files/upload', authMiddleware, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'missing_file' });
+  const u = await ensureActiveUser(req.user.sub);
+  const schema = z.object({
+    recipientUserId: z.string().min(10),
+    kind: z.enum(['MESSAGE']),
+    originalName: z.string().max(256).optional(),
+    mime: z.string().max(128).optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    try { fs.unlinkSync(req.file.path); } catch {}
+    return res.status(400).json({ error: 'bad_request' });
+  }
+
+  const body = parsed.data;
+  const file = await prisma.fileAsset.create({
+    data: {
+      ownerUserId: u.id,
+      recipientUserId: body.recipientUserId,
+      kind: 'MESSAGE',
+      originalName: body.originalName || req.file.originalname,
+      mime: body.mime || req.file.mimetype || 'application/octet-stream',
+      size: req.file.size,
+      storagePath: req.file.path,
+    }
+  });
+
+  return res.json({ file: { id: file.id, size: file.size, url: fileUrl(file.id) } });
+});
+
+// Download file (encrypted for MESSAGE files)
+app.get('/files/:id', authMiddleware, async (req, res) => {
+  const id = req.params.id;
+  const file = await prisma.fileAsset.findUnique({ where: { id } });
+  if (!file) return res.status(404).json({ error: 'file_not_found' });
+
+  const userId = req.user?.sub;
+  if (file.kind === 'MESSAGE') {
+    if (file.ownerUserId !== userId && file.recipientUserId !== userId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+  }
+
+  const abs = path.resolve(file.storagePath);
+  const mime = file.mime || 'application/octet-stream';
+  res.setHeader('Content-Type', mime);
+  const name = file.originalName ? file.originalName.replace(/[^a-zA-Z0-9._-]/g, '_') : `${file.id}.bin`;
+  const disposition = file.kind === 'AVATAR' ? 'inline' : 'attachment';
+  res.setHeader('Content-Disposition', `${disposition}; filename="${name}"`);
+  return res.sendFile(abs);
 });
 
 // ===== Devices =====
@@ -466,6 +674,13 @@ app.post('/admin/invites', authMiddleware, adminOnly, async (req, res) => {
 app.get('/admin/invites', authMiddleware, adminOnly, async (req, res) => {
   const invites = await prisma.inviteCode.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
   return res.json({ invites });
+});
+
+// ===== Error handling =====
+app.use((err, req, res, next) => {
+  if (err?.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'file_too_large' });
+  console.error(err);
+  return res.status(500).json({ error: 'server_error' });
 });
 
 // ===== WebSocket notify =====

@@ -4,6 +4,7 @@ import { useAuth } from '../state/auth.jsx'
 export default function TopBar() {
   const { me, logout } = useAuth()
   const initial = me?.username ? me.username.slice(0, 1).toUpperCase() : 'U'
+  const avatarUrl = me?.avatarUrl || ''
   return (
     <div className="topbar">
       <div className="brand">
@@ -13,7 +14,11 @@ export default function TopBar() {
       <div className="topbar-actions">
         {me && (
           <div className="user-chip">
-            <div className="avatar-sm">{initial}</div>
+            {avatarUrl ? (
+              <img className="avatar-img avatar-sm" src={avatarUrl} alt="avatar" />
+            ) : (
+              <div className="avatar-sm">{initial}</div>
+            )}
             <div className="user-meta">
               <div className="user-name">{me.username}</div>
               <div className="user-role">{me.role === 'ADMIN' ? 'Admin' : 'User'}</div>

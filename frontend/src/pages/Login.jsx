@@ -39,7 +39,7 @@ export default function Login() {
           </label>
           <label className="field">
             <span>Password</span>
-            <input className="input" placeholder="••••••••" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+            <input className="input" placeholder="********" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
           </label>
           {err && <div className="inline-error">{err}</div>}
           <button className="btn primary full">Login</button>
@@ -47,6 +47,7 @@ export default function Login() {
         <div className="auth-links">
           <Link to="/register">Create account</Link>
           <Link to="/qr">QR login</Link>
+          <Link to="/smartkey/login">Smart key login</Link>
         </div>
       </div>
       <div className="auth-side">

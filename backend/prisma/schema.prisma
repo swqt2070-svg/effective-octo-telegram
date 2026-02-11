@@ -26,7 +26,13 @@ model User {
   role         UserRole      @default(USER)
   status       AccountStatus @default(ACTIVE)
   createdAt    DateTime      @default(now())
+  avatarFileId String?
   devices      Device[]
+
+  avatarFile   FileAsset?    @relation("avatarFile", fields: [avatarFileId], references: [id])
+  files        FileAsset[]   @relation("ownerFiles")
+  filesReceived FileAsset[]  @relation("recipientFiles")
+  smartKeys    SmartKey[]
 }
 
 model Device {
@@ -98,5 +104,54 @@ model QrLogin {
   createdAt        DateTime @default(now())
   expiresAt        DateTime
   approvedByUserId String?
+  issuedJwt        String?
+}
+
+enum FileKind {
+  MESSAGE
+  AVATAR
+}
+
+model FileAsset {
+  id              String    @id @default(cuid())
+  ownerUserId     String
+  recipientUserId String?
+  kind            FileKind
+  originalName    String?
+  mime            String?
+  size            Int
+  storagePath     String
+  createdAt       DateTime  @default(now())
+
+  owner           User      @relation("ownerFiles", fields: [ownerUserId], references: [id])
+  recipient       User?     @relation("recipientFiles", fields: [recipientUserId], references: [id])
+  avatarFor       User?     @relation("avatarFile")
+}
+
+model SmartKey {
+  id          String   @id @default(cuid())
+  userId      String
+  deviceName  String?
+  secretHash  String   @unique
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model SmartKeyBind {
+  token     String   @id
+  userId    String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+model SmartKeyLogin {
+  token            String   @id
+  status           QrStatus @default(PENDING)
+  createdAt        DateTime @default(now())
+  expiresAt        DateTime
+  approvedByUserId String?
+  approvedByKeyId  String?
   issuedJwt        String?
 }
