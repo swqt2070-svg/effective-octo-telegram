@@ -4,6 +4,10 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
+html, body, #root {
+  height: 100%;
+}
+
 :root {
   color-scheme: dark;
   --bg: #0b1118;
@@ -28,6 +32,7 @@ body {
     radial-gradient(1200px 600px at 12% -10%, rgba(76, 201, 240, 0.12), transparent 60%),
     radial-gradient(900px 500px at 85% 10%, rgba(58, 124, 255, 0.12), transparent 55%),
     linear-gradient(180deg, var(--bg), var(--bg-2));
+  overflow: hidden;
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -36,9 +41,10 @@ a:hover { text-decoration: underline; }
 .mono { font-family: 'JetBrains Mono', monospace; }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .topbar {
