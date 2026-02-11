@@ -56,7 +56,7 @@ function extractBodyB64(packed) {
 
 export default function Chat() {
   const { token, me, logout } = useAuth()
-  const [deviceId, setDeviceId] = useState(getLocal('deviceId') || '')
+  const [deviceId, setDeviceId] = useState('')
   const [chats, setChats] = useState([])
   const [activePeer, setActivePeer] = useState(null) // {peerId, username, displayName}
   const [messages, setMessages] = useState([])
@@ -66,6 +66,7 @@ export default function Chat() {
   const [showMenu, setShowMenu] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const wsRef = useRef(null)
+  const activePeerRef = useRef(null)
 
   const store = useMemo(() => (me && deviceId) ? newStoreForDevice(me.id, deviceId) : null, [me, deviceId])
   const lsStore = useMemo(() => store ? makeLibSignalStore(store) : null, [store])
@@ -78,12 +79,15 @@ export default function Chat() {
     }).catch(()=>{})
   }, [token, me, deviceId])
 
-  async function refreshChats(){
+  useEffect(() => { activePeerRef.current = activePeer }, [activePeer])
+
+  async function refreshChats(peerIdOverride){
     if (!deviceId) return
     const idx = await listChats(deviceId)
     setChats(idx)
-    if (activePeer) {
-      const msgs = await loadMessages(deviceId, activePeer.peerId)
+    const peerId = peerIdOverride || activePeerRef.current?.peerId
+    if (peerId) {
+      const msgs = await loadMessages(deviceId, peerId)
       setMessages(msgs)
     }
   }

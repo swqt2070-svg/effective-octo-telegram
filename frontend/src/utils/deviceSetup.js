@@ -4,6 +4,14 @@ import { newStoreForDevice, ensureLocalIdentity, generatePreKeys, generateSigned
 
 let inFlight = null
 
+function deviceIdKey(userId) {
+  return `deviceId:${userId}`
+}
+
+function deviceNameKey(userId) {
+  return `deviceName:${userId}`
+}
+
 function guessDeviceName() {
   const saved = getLocal('deviceName')
   if (saved) return saved
@@ -38,31 +46,41 @@ export async function ensureDeviceSetup(token, me) {
   if (!token || !me?.id) return null
   if (inFlight) return inFlight
   inFlight = (async () => {
-    let deviceId = getLocal('deviceId') || ''
+    const perUserKey = deviceIdKey(me.id)
+    const perUserNameKey = deviceNameKey(me.id)
+    let deviceId = getLocal(perUserKey) || ''
     const r = await apiGet('/devices', token)
     const devices = r.devices || []
 
+    // Legacy migration (old global key): only adopt if it belongs to this user
+    if (!deviceId) {
+      const legacy = getLocal('deviceId') || ''
+      if (legacy && devices.find(d => d.id === legacy)) {
+        deviceId = legacy
+        setLocal(perUserKey, legacy)
+        const legacyName = getLocal('deviceName')
+        if (legacyName) setLocal(perUserNameKey, legacyName)
+      }
+    }
+
     let device = deviceId ? devices.find(d => d.id === deviceId) : null
     if (!device) {
-      if (devices.length) {
-        device = devices[0]
-        deviceId = device.id
-        setLocal('deviceId', deviceId)
-        if (device.name) setLocal('deviceName', device.name)
-      } else {
-        const name = guessDeviceName()
-        const created = await apiPost('/devices', { name }, token)
-        device = created.device
-        deviceId = device.id
-        setLocal('deviceId', deviceId)
-        setLocal('deviceName', name)
-      }
+      const name = guessDeviceName()
+      const created = await apiPost('/devices', { name }, token)
+      device = created.device
+      deviceId = device.id
+      setLocal(perUserKey, deviceId)
+      setLocal(perUserNameKey, name)
     }
 
     if (!device) return null
 
+    const store = newStoreForDevice(me.id, deviceId)
+    const localIdentity = await store.get('identityKey')
+    const localReg = await store.get('registrationId')
+    const localHasIdentity = !!(localIdentity && localReg)
     const needsKeys = !device.identityKeyPub || !device.registrationId || !device.signedPreKeyId || !device.signedPreKeyPub || !device.signedPreKeySig
-    if (needsKeys) {
+    if (needsKeys || !localHasIdentity) {
       await uploadKeys(token, me.id, deviceId)
     }
     return deviceId

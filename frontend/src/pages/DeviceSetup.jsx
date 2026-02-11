@@ -7,11 +7,18 @@ import { newStoreForDevice, ensureLocalIdentity, generatePreKeys, generateSigned
 
 export default function DeviceSetup() {
   const { token, me } = useAuth()
-  const [deviceId, setDeviceId] = useState(getLocal('deviceId') || '')
-  const [deviceName, setDeviceName] = useState(getLocal('deviceName') || '')
+  const [deviceId, setDeviceId] = useState('')
+  const [deviceName, setDeviceName] = useState('')
   const [status, setStatus] = useState('')
   const [err, setErr] = useState('')
   const [devices, setDevices] = useState([])
+
+  function deviceIdKey() {
+    return me?.id ? `deviceId:${me.id}` : 'deviceId'
+  }
+  function deviceNameKey() {
+    return me?.id ? `deviceName:${me.id}` : 'deviceName'
+  }
 
   async function refresh(){
     const r = await apiGet('/devices', token)
@@ -19,6 +26,11 @@ export default function DeviceSetup() {
   }
 
   useEffect(() => { if (token) refresh().catch(()=>{}) }, [token])
+  useEffect(() => {
+    if (!me?.id) return
+    setDeviceId(getLocal(deviceIdKey()) || '')
+    setDeviceName(getLocal(deviceNameKey()) || '')
+  }, [me?.id])
 
   async function createDevice(){
     setErr(''); setStatus('Creating device...')
@@ -26,8 +38,8 @@ export default function DeviceSetup() {
       const name = deviceName || `Device-${Math.floor(Math.random()*1000)}`
       const r = await apiPost('/devices', { name }, token)
       setDeviceId(r.device.id)
-      setLocal('deviceId', r.device.id)
-      setLocal('deviceName', name)
+      setLocal(deviceIdKey(), r.device.id)
+      setLocal(deviceNameKey(), name)
       setStatus('Device created. Generating keys...')
       await uploadKeys(r.device.id)
       setStatus('Ready.')
@@ -58,7 +70,7 @@ export default function DeviceSetup() {
   }
 
   async function selectDevice(id){
-    setLocal('deviceId', id)
+    setLocal(deviceIdKey(), id)
     setDeviceId(id)
     setStatus('Selected device.')
   }
