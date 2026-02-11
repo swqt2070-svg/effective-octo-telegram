@@ -364,7 +364,8 @@ export default function Chat() {
     await refreshChats(peerId)
 
     try{
-      const envelopes = await buildEnvelopes(peerId, full)
+      const exclude = peerId === me.id ? [deviceId] : []
+      const envelopes = await buildEnvelopes(peerId, full, exclude)
       if (envelopes.length) {
         await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: peerId, envelopes }, token)
       }
