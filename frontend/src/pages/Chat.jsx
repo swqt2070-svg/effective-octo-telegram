@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import TopBar from '../components/TopBar.jsx'
 import { useAuth } from '../state/auth.jsx'
 import { apiGet, apiPost, apiPostForm, apiGetBuffer, API_URL } from '../utils/api.js'
-import { listChats, upsertChat, loadMessages, appendMessage } from '../utils/chatStore.js'
+import { listChats, upsertChat, loadMessages, appendMessage, deleteChat } from '../utils/chatStore.js'
 import { newStoreForDevice, makeLibSignalStore, makeAddress, buildSessionFromBundle, encryptToAddress, decryptFromAddress } from '../signal/signal.js'
 import { ensureDeviceSetup } from '../utils/deviceSetup.js'
 import { aesGcmEncrypt, aesGcmDecrypt } from '../utils/crypto.js'
@@ -72,7 +72,7 @@ function messageKey(m, idx) {
 }
 
 export default function Chat() {
-  const { token, me, logout, refreshMe } = useAuth()
+  const { token, me, logout } = useAuth()
   const [deviceId, setDeviceId] = useState('')
   const [chats, setChats] = useState([])
   const [activePeer, setActivePeer] = useState(null) // {peerId, username, displayName}
@@ -87,7 +87,6 @@ export default function Chat() {
   const [fileUrls, setFileUrls] = useState({})
   const wsRef = useRef(null)
   const activePeerRef = useRef(null)
-  const avatarInputRef = useRef(null)
   const fileInputRef = useRef(null)
   const fileUrlCacheRef = useRef(new Map())
 
@@ -143,6 +142,15 @@ export default function Chat() {
             }
             const addr = makeAddress(env.senderUserId, env.senderDeviceId)
             const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64 })
+            if (plain?.t === 'control' && plain.action === 'delete_chat' && plain.peerId) {
+              await deleteChat(deviceId, plain.peerId)
+              if (activePeerRef.current?.peerId === plain.peerId) {
+                setActivePeer(null)
+                setMessages([])
+              }
+              await refreshChats()
+              continue
+            }
             await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
             await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
           }catch(ex){
@@ -186,6 +194,15 @@ export default function Chat() {
                   }
                   const addr = makeAddress(env.senderUserId, env.senderDeviceId)
                   const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64 })
+                  if (plain?.t === 'control' && plain.action === 'delete_chat' && plain.peerId) {
+                    await deleteChat(deviceId, plain.peerId)
+                    if (activePeerRef.current?.peerId === plain.peerId) {
+                      setActivePeer(null)
+                      setMessages([])
+                    }
+                    await refreshChats()
+                    continue
+                  }
                   await appendMessage(deviceId, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
                   await upsertChat(deviceId, { peerId, title: plain.fromUsername || peerId, lastText: plain.text || '(msg)', lastTs: Date.parse(env.createdAt) })
                 }catch(ex){
@@ -248,21 +265,59 @@ export default function Chat() {
     await refreshChats(peerId)
 
     try{
-      const devs = await apiGet(`/users/${encodeURIComponent(peerId)}/devices`, token)
-      const envelopes = []
-      for (const d of devs.devices){
-        const b = await apiGet(`/keys/bundle?userId=${encodeURIComponent(peerId)}&deviceId=${encodeURIComponent(d.id)}`, token)
-        const addr = makeAddress(peerId, d.id)
-        await buildSessionFromBundle(lsStore, addr, b.bundle)
-        const enc = await encryptToAddress(lsStore, addr, full)
-        const packed = btoa(JSON.stringify({ type: enc.type, bodyB64: enc.bodyB64 }))
-        envelopes.push({ recipientDeviceId: d.id, ciphertext: packed })
+      const envelopes = await buildEnvelopes(peerId, full)
+      if (envelopes.length) {
+        await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: peerId, envelopes }, token)
       }
-      await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: peerId, envelopes }, token)
     }catch(ex){
       await appendMessage(deviceId, peerId, { t:'sys', text:'[send failed] ' + ex.message, ts: now(), _ts: now() })
       await refreshChats(peerId)
     }
+  }
+
+  async function buildEnvelopes(recipientUserId, payload, excludeDeviceIds = []){
+    const devs = await apiGet(`/users/${encodeURIComponent(recipientUserId)}/devices`, token)
+    const envelopes = []
+    for (const d of devs.devices){
+      if (excludeDeviceIds.includes(d.id)) continue
+      const b = await apiGet(`/keys/bundle?userId=${encodeURIComponent(recipientUserId)}&deviceId=${encodeURIComponent(d.id)}`, token)
+      const addr = makeAddress(recipientUserId, d.id)
+      await buildSessionFromBundle(lsStore, addr, b.bundle)
+      const enc = await encryptToAddress(lsStore, addr, payload)
+      const packed = btoa(JSON.stringify({ type: enc.type, bodyB64: enc.bodyB64 }))
+      envelopes.push({ recipientDeviceId: d.id, ciphertext: packed })
+    }
+    return envelopes
+  }
+
+  async function sendControl(recipientUserId, payload, excludeDeviceIds = []){
+    const envelopes = await buildEnvelopes(recipientUserId, payload, excludeDeviceIds)
+    if (!envelopes.length) return
+    await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId, envelopes }, token)
+  }
+
+  async function deleteChatForBoth(){
+    if (!activePeer) return
+    const peerId = activePeer.peerId
+    setShowInfo(false)
+    await deleteChat(deviceId, peerId)
+    if (activePeerRef.current?.peerId === peerId) {
+      setActivePeer(null)
+      setMessages([])
+    }
+    await refreshChats()
+    try{
+      await apiPost('/messages/delete-conversation', { peerUserId: peerId }, token)
+    }catch{}
+    const ts = now()
+    // notify peer to delete chat with me
+    try{
+      await sendControl(peerId, { t:'control', action:'delete_chat', peerId: me.id, ts, from: me.id, fromUsername: me.username })
+    }catch{}
+    // notify my other devices to delete chat with peer
+    try{
+      await sendControl(me.id, { t:'control', action:'delete_chat', peerId, ts, from: me.id, fromUsername: me.username }, [deviceId])
+    }catch{}
   }
 
   async function sendMessage(){
@@ -321,14 +376,6 @@ export default function Chat() {
     return url
   }
 
-  async function handleAvatarUpload(file){
-    if (!file) return
-    const fd = new FormData()
-    fd.append('file', file)
-    await apiPostForm('/users/me/avatar', fd, token)
-    await refreshMe()
-  }
-
   if (!deviceId) {
     return (
       <div className="app-shell">
@@ -349,14 +396,12 @@ export default function Chat() {
   }
 
   const meInitial = me?.username ? me.username.slice(0, 1).toUpperCase() : 'U'
-  const meAvatar = me?.avatarUrl || ''
   const activeTitle = activePeer ? (activePeer.username || shortId(activePeer.peerId)) : 'Select a chat'
   const activeId = activePeer?.peerId || ''
   const activeInitial = activePeer?.username ? activePeer.username.slice(0, 1).toUpperCase() : shortId(activeId).slice(0, 1).toUpperCase()
-  const activeAvatar = activePeer?.avatarUrl || ''
   const infoTarget = activePeer
-    ? { name: activeTitle, id: activeId, role: 'Contact', avatarUrl: activeAvatar }
-    : (me ? { name: me.username || shortId(me.id), id: me.id, role: 'You', avatarUrl: meAvatar } : null)
+    ? { name: activeTitle, id: activeId, role: 'Contact' }
+    : (me ? { name: me.username || shortId(me.id), id: me.id, role: 'You' } : null)
 
   return (
     <div className="app-shell">
@@ -364,11 +409,7 @@ export default function Chat() {
       <div className={`menu-backdrop ${showMenu ? 'show' : ''}`} onClick={() => setShowMenu(false)} />
       <aside className={`menu-drawer ${showMenu ? 'open' : ''}`}>
         <div className="menu-profile">
-          {meAvatar ? (
-            <img className="avatar-img avatar-lg" src={meAvatar} alt="avatar" />
-          ) : (
-            <div className="avatar-lg">{meInitial}</div>
-          )}
+          <div className="avatar-lg">{meInitial}</div>
           <div>
             <div className="menu-name">{me?.username || 'User'}</div>
             <div className="menu-id">{me?.id ? shortId(me.id) : 'No id'}</div>
@@ -378,10 +419,6 @@ export default function Chat() {
           <button className="menu-item" onClick={() => { setShowMenu(false); setShowInfo(true) }}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0-4-4a4 4 0 0 0 4 4Zm0 2c-4.4 0-8 2-8 4.5V21h16v-2.5c0-2.5-3.6-4.5-8-4.5Z" /></svg>
             <span>My profile</span>
-          </button>
-          <button className="menu-item" onClick={() => avatarInputRef.current?.click()}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h4l2-2h4l2 2h4v12H4V7Zm8 3a4 4 0 1 0 0 8a4 4 0 0 0 0-8Z" /></svg>
-            <span>Change avatar</span>
           </button>
           <button className="menu-item" onClick={() => setShowMenu(false)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8v4H3V6Zm10 0h8v4h-8V6ZM3 14h8v4H3v-4Zm10 0h8v4h-8v-4Z" /></svg>
@@ -461,11 +498,7 @@ export default function Chat() {
               const lastTs = c.lastTs || 0
               return (
                 <button key={c.peerId} onClick={()=>openChat(c.peerId)} className={`chat-item ${isActive ? 'active' : ''}`}>
-                  {c.avatarUrl ? (
-                    <img className="avatar-img avatar" src={c.avatarUrl} alt="avatar" />
-                  ) : (
-                    <div className="avatar">{(title || 'U').slice(0,1).toUpperCase()}</div>
-                  )}
+                  <div className="avatar">{(title || 'U').slice(0,1).toUpperCase()}</div>
                   <div className="chat-item-main">
                     <div className="chat-item-top">
                       <div className="chat-title">{title}</div>
@@ -485,11 +518,7 @@ export default function Chat() {
         <main className="chat-main panel">
           <div className="chat-header">
             <div className="chat-header-left">
-              {activeAvatar ? (
-                <img className="avatar-img avatar" src={activeAvatar} alt="avatar" />
-              ) : (
-                <div className={`avatar ${activePeer ? '' : 'muted'}`}>{activePeer ? activeInitial : '?'}</div>
-              )}
+              <div className={`avatar ${activePeer ? '' : 'muted'}`}>{activePeer ? activeInitial : '?'}</div>
               <div className="chat-header-title">
                 <div className="chat-name">{activeTitle}</div>
                 {activePeer && <div className="chat-sub">{activeId}</div>}
@@ -578,11 +607,7 @@ export default function Chat() {
             <aside className={`info-drawer ${showInfo ? 'open' : ''}`}>
               <div className="info-head">
                 <div className="info-head-main">
-                  {infoTarget.avatarUrl ? (
-                    <img className="avatar-img avatar-lg" src={infoTarget.avatarUrl} alt="avatar" />
-                  ) : (
-                    <div className="avatar-lg">{infoTarget.name.slice(0, 1).toUpperCase()}</div>
-                  )}
+                  <div className="avatar-lg">{infoTarget.name.slice(0, 1).toUpperCase()}</div>
                   <div>
                     <div className="info-name">{infoTarget.name}</div>
                     <div className="info-sub">{infoTarget.role}</div>
@@ -603,7 +628,7 @@ export default function Chat() {
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5a7 7 0 1 1 0 14a7 7 0 0 1 0-14Zm0 2a5 5 0 1 0 0 10a5 5 0 0 0 0-10Z" /></svg>
                   <span>Mute</span>
                 </button>
-                <button className="menu-item danger">
+                <button className="menu-item danger" onClick={deleteChatForBoth}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7Zm2-4h8l1 3H7l1-3Z" /></svg>
                   <span>Delete chat</span>
                 </button>
@@ -612,17 +637,6 @@ export default function Chat() {
           )}
         </main>
       </div>
-      <input
-        ref={avatarInputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={async (e) => {
-          const file = e.target.files?.[0]
-          if (file) await handleAvatarUpload(file)
-          e.target.value = ''
-        }}
-      />
       <input
         ref={fileInputRef}
         type="file"

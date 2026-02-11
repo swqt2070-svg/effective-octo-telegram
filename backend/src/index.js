@@ -575,6 +575,44 @@ app.post('/messages/send', authMiddleware, async (req, res) => {
   return res.json({ ok: true, count: created.length });
 });
 
+app.post('/messages/delete-conversation', authMiddleware, async (req, res) => {
+  const schema = z.object({ peerUserId: z.string().min(10) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
+
+  const u = await ensureActiveUser(req.user.sub);
+  const peerUserId = parsed.data.peerUserId;
+
+  const deleted = await prisma.messageEnvelope.deleteMany({
+    where: {
+      OR: [
+        { senderUserId: u.id, recipientUserId: peerUserId },
+        { senderUserId: peerUserId, recipientUserId: u.id },
+      ]
+    }
+  });
+
+  const files = await prisma.fileAsset.findMany({
+    where: {
+      kind: 'MESSAGE',
+      OR: [
+        { ownerUserId: u.id, recipientUserId: peerUserId },
+        { ownerUserId: peerUserId, recipientUserId: u.id },
+      ],
+    },
+    select: { id: true, storagePath: true },
+  });
+
+  if (files.length) {
+    await prisma.fileAsset.deleteMany({ where: { id: { in: files.map(f => f.id) } } });
+    for (const f of files) {
+      try { fs.unlinkSync(f.storagePath); } catch {}
+    }
+  }
+
+  return res.json({ ok: true, deletedMessages: deleted.count, deletedFiles: files.length });
+});
+
 app.get('/messages/pending', authMiddleware, async (req, res) => {
   const schema = z.object({
     deviceId: z.string().min(10),

@@ -28,3 +28,9 @@ export async function appendMessage(deviceId, peerId, msg){
   await set(chatKey(deviceId, peerId), arr)
 }
 
+export async function deleteChat(deviceId, peerId){
+  const idx = await listChats(deviceId)
+  const next = idx.filter(c => c.peerId !== peerId)
+  await set(chatsIndexKey(deviceId), next)
+  await set(chatKey(deviceId, peerId), [])
+}
