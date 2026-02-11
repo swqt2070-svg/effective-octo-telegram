@@ -46,18 +46,18 @@ export default function QrMobileApprove() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="app-shell">
       <TopBar />
-      <div className="max-w-2xl mx-auto p-6 space-y-4">
-        <div className="text-xl font-semibold">Approve QR login</div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
-          <div className="text-sm text-zinc-400">Scan the desktop QR code or paste token:</div>
-          <video ref={videoRef} className="w-full rounded-lg border border-zinc-800 bg-black" />
-          <div className="flex gap-2">
-            <input className="flex-1 px-3 py-2 rounded bg-zinc-950 border border-zinc-800 text-sm font-mono" placeholder="qr token" value={qrToken} onChange={e=>setQrToken(e.target.value)} />
-            <button className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 text-sm font-medium" onClick={approve}>Approve</button>
+      <div className="page-wrap">
+        <div className="page-title">Approve QR login</div>
+        <div className="panel device-panel">
+          <div className="device-status">Scan the desktop QR code or paste token:</div>
+          <video ref={videoRef} className="qr-box" />
+          <div className="device-actions">
+            <input className="input mono" placeholder="qr token" value={qrToken} onChange={e=>setQrToken(e.target.value)} />
+            <button className="btn primary" onClick={approve}>Approve</button>
           </div>
-          {status && <div className="text-sm text-zinc-300">{status}</div>}
+          {status && <div className="device-status">{status}</div>}
         </div>
       </div>
     </div>

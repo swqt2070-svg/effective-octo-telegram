@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { apiPost, apiGet } from '../utils/api.js'
 import { useAuth } from '../state/auth.jsx'
 import QRCode from 'qrcode'
+import { ensureDeviceSetup } from '../utils/deviceSetup.js'
 
 export default function QrDesktop() {
   const nav = useNavigate()
@@ -34,7 +35,9 @@ export default function QrDesktop() {
         const r = await apiGet(`/auth/qr/status?qrToken=${encodeURIComponent(qrToken)}`)
         if (r.status === 'APPROVED' && r.token) {
           setToken(r.token)
-          nav('/device')
+          const me = await apiGet('/me', r.token)
+          await ensureDeviceSetup(r.token, me)
+          nav('/chat')
           return
         }
         if (r.status === 'EXPIRED') {
@@ -49,20 +52,28 @@ export default function QrDesktop() {
   }, [qrToken])
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-center">
-        <div className="text-xl font-semibold mb-2">QR login</div>
-        <div className="text-sm text-zinc-400 mb-4">{status}</div>
-        {qrDataUrl ? (
-          <img src={qrDataUrl} className="mx-auto rounded-lg border border-zinc-800" alt="QR" />
-        ) : (
-          <div className="h-64 flex items-center justify-center text-zinc-500">Generating…</div>
-        )}
-        <div className="mt-4 text-xs text-zinc-500 break-all">
-          QR token: <span className="font-mono">{qrToken}</span>
+    <div className="auth-shell">
+      <div className="auth-card center">
+        <div className="auth-head">
+          <div className="auth-title">QR login</div>
+          <div className="auth-sub">{status}</div>
         </div>
-        <div className="mt-4 text-sm text-zinc-400">
-          Or <a className="text-blue-400 hover:underline" href="/login">login by password</a>.
+        {qrDataUrl ? (
+          <img src={qrDataUrl} className="qr-box" alt="QR" />
+        ) : (
+          <div className="qr-box placeholder">Generating...</div>
+        )}
+        <div className="qr-meta">
+          Token: <span className="mono">{qrToken}</span>
+        </div>
+        <div className="auth-links">
+          <a href="/login">Login by password</a>
+        </div>
+      </div>
+      <div className="auth-side">
+        <div className="side-blurb">
+          <div className="side-title">Scan & approve</div>
+          <div className="side-text">Open the app on your phone, scan the QR, and approve the sign-in.</div>
         </div>
       </div>
     </div>

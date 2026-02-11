@@ -5,8 +5,18 @@ import { apiGet, apiPost, API_URL } from '../utils/api.js'
 import { getLocal } from '../utils/local.js'
 import { listChats, upsertChat, loadMessages, appendMessage } from '../utils/chatStore.js'
 import { newStoreForDevice, makeLibSignalStore, makeAddress, buildSessionFromBundle, encryptToAddress, decryptFromAddress } from '../signal/signal.js'
+import { ensureDeviceSetup } from '../utils/deviceSetup.js'
 
 function now(){ return Date.now() }
+function shortId(s){
+  if (!s) return ''
+  return s.length > 18 ? s.slice(0, 6) + '...' + s.slice(-4) : s
+}
+function formatTime(ts){
+  if (!ts) return ''
+  const d = new Date(ts)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
 
 function decodeCiphertext(ciphertext) {
   if (!ciphertext) throw new Error('empty ciphertext')
@@ -45,18 +55,28 @@ function extractBodyB64(packed) {
 }
 
 export default function Chat() {
-  const { token, me } = useAuth()
-  const deviceId = getLocal('deviceId') || ''
+  const { token, me, logout } = useAuth()
+  const [deviceId, setDeviceId] = useState(getLocal('deviceId') || '')
   const [chats, setChats] = useState([])
   const [activePeer, setActivePeer] = useState(null) // {peerId, username, displayName}
   const [messages, setMessages] = useState([])
   const [search, setSearch] = useState('')
   const [lookupErr, setLookupErr] = useState('')
   const [sendText, setSendText] = useState('')
+  const [showMenu, setShowMenu] = useState(false)
+  const [showInfo, setShowInfo] = useState(false)
   const wsRef = useRef(null)
 
   const store = useMemo(() => (me && deviceId) ? newStoreForDevice(me.id, deviceId) : null, [me, deviceId])
   const lsStore = useMemo(() => store ? makeLibSignalStore(store) : null, [store])
+
+  useEffect(() => {
+    if (!token || !me) return
+    if (deviceId) return
+    ensureDeviceSetup(token, me).then((id) => {
+      if (id) setDeviceId(id)
+    }).catch(()=>{})
+  }, [token, me, deviceId])
 
   async function refreshChats(){
     if (!deviceId) return
@@ -69,6 +89,7 @@ export default function Chat() {
   }
 
   useEffect(() => { refreshChats().catch(()=>{}) }, [deviceId])
+  useEffect(() => { setShowInfo(false) }, [activePeer?.peerId])
 
   useEffect(() => {
     let t
@@ -214,70 +235,218 @@ export default function Chat() {
 
   if (!deviceId) {
     return (
-      <div className="min-h-screen">
+      <div className="app-shell">
         <TopBar />
-        <div className="p-6 max-w-3xl mx-auto">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-            <div className="font-semibold mb-2">No device selected</div>
-            <div className="text-sm text-zinc-400">Go to /device and create/select a device first.</div>
+        <div className="device-wait">
+          <div className="device-card">
+            <div className="device-title">Preparing secure device</div>
+            <div className="device-sub">We are generating keys and syncing your device. This takes a few seconds.</div>
+            <div className="device-progress">
+              <span />
+              <span />
+              <span />
+            </div>
           </div>
         </div>
       </div>
     )
   }
 
+  const meInitial = me?.username ? me.username.slice(0, 1).toUpperCase() : 'U'
+  const activeTitle = activePeer ? (activePeer.username || shortId(activePeer.peerId)) : 'Select a chat'
+  const activeId = activePeer?.peerId || ''
+  const activeInitial = activePeer?.username ? activePeer.username.slice(0, 1).toUpperCase() : shortId(activeId).slice(0, 1).toUpperCase()
+  const infoTarget = activePeer ? { name: activeTitle, id: activeId, role: 'Contact' } : (me ? { name: me.username || shortId(me.id), id: me.id, role: 'You' } : null)
+
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="app-shell">
       <TopBar />
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar */}
-        <div className="w-80 border-r border-zinc-800 bg-zinc-950 flex flex-col">
-          <div className="p-3 border-b border-zinc-800">
-            <div className="flex gap-2">
-              <input className="flex-1 px-3 py-2 rounded bg-zinc-900 border border-zinc-800 text-sm" placeholder="Search username / id" value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={(e)=>{ if(e.key==='Enter') lookupUser() }} />
-              <button className="px-3 py-2 rounded bg-zinc-800 hover:bg-zinc-700 text-sm" onClick={lookupUser}>Find</button>
-            </div>
-            {lookupErr && <div className="text-xs text-red-400 mt-2">{lookupErr}</div>}
+      <div className={`menu-backdrop ${showMenu ? 'show' : ''}`} onClick={() => setShowMenu(false)} />
+      <aside className={`menu-drawer ${showMenu ? 'open' : ''}`}>
+        <div className="menu-profile">
+          <div className="avatar-lg">{meInitial}</div>
+          <div>
+            <div className="menu-name">{me?.username || 'User'}</div>
+            <div className="menu-id">{me?.id ? shortId(me.id) : 'No id'}</div>
           </div>
-          <div className="flex-1 overflow-auto">
-            {chats.map(c => (
-              <button key={c.peerId} onClick={()=>openChat(c.peerId)} className={`w-full text-left px-3 py-3 border-b border-zinc-900 hover:bg-zinc-900 ${activePeer?.peerId===c.peerId?'bg-zinc-900':''}`}>
-                <div className="font-medium text-sm">{c.title || c.peerId}</div>
-                <div className="text-xs text-zinc-500 truncate">{c.lastText || ''}</div>
-              </button>
-            ))}
+        </div>
+        <div className="menu-list">
+          <button className="menu-item" onClick={() => { setShowMenu(false); setShowInfo(true) }}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0-4-4a4 4 0 0 0 4 4Zm0 2c-4.4 0-8 2-8 4.5V21h16v-2.5c0-2.5-3.6-4.5-8-4.5Z" /></svg>
+            <span>My profile</span>
+          </button>
+          <button className="menu-item" onClick={() => setShowMenu(false)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h8v4H3V6Zm10 0h8v4h-8V6ZM3 14h8v4H3v-4Zm10 0h8v4h-8v-4Z" /></svg>
+            <span>New group</span>
+          </button>
+          <button className="menu-item" onClick={() => setShowMenu(false)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h12a2 2 0 0 1 2 2v16l-4-3H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" /></svg>
+            <span>Saved messages</span>
+          </button>
+          <button className="menu-item" onClick={() => setShowMenu(false)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a5 5 0 0 1 5 5v3l2 2v1H5v-1l2-2V7a5 5 0 0 1 5-5Zm-3 17h6a3 3 0 0 1-6 0Z" /></svg>
+            <span>Notifications</span>
+          </button>
+          <button className="menu-item" onClick={() => setShowMenu(false)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a2 2 0 1 1 0-4a2 2 0 0 1 0 4Zm0 7a2 2 0 1 1 0-4a2 2 0 0 1 0 4Zm0 7a2 2 0 1 1 0-4a2 2 0 0 1 0 4Z" /></svg>
+            <span>Settings</span>
+          </button>
+        </div>
+        <div className="menu-divider" />
+        <button className="menu-item danger" onClick={() => { setShowMenu(false); logout(); location.href = '/login' }}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h8a2 2 0 0 1 2 2v3h-2V5H5v14h8v-3h2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm10.6 5.6L18 11h-8v2h8l-2.4 2.4 1.4 1.4L22.8 12l-5.8-5.8-1.4 1.4Z" /></svg>
+          <span>Logout</span>
+        </button>
+      </aside>
+      <div className="chat-layout">
+        <aside className="nav-rail">
+          <div className="nav-rail-top">
+            <div className="brand-badge">LM</div>
+          </div>
+          <div className="nav-rail-group">
+            <button className="nav-icon active" title="Chats">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v10H7l-3 3V5z" /></svg>
+            </button>
+            <button className="nav-icon" title="Contacts">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7a3 3 0 1 1 6 0a3 3 0 0 1-6 0Zm-3 9c0-2.2 3.2-4 6-4s6 1.8 6 4v2H4v-2Zm12-7h4v9h-4z" /></svg>
+            </button>
+            <button className="nav-icon" title="Calls">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8c1.5 3 3.6 5.1 6.6 6.6l2.2-2.2c.2-.2.6-.3.9-.2 1 .3 2 .5 3.1.5.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C9.4 21 3 14.6 3 6c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.1.2 2.1.5 3.1.1.3 0 .7-.2.9l-2.2 2.2z"/></svg>
+            </button>
+          </div>
+          <div className="nav-rail-bottom">
+            <button className="nav-icon" title="Settings">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 1 0 7a3.5 3.5 0 0 1 0-7Zm8.6 2.3l-1.7-.3a6.9 6.9 0 0 0-.7-1.7l1-1.4-1.4-1.4-1.4 1a6.9 6.9 0 0 0-1.7-.7l-.3-1.7h-2l-.3 1.7a6.9 6.9 0 0 0-1.7.7l-1.4-1-1.4 1.4 1 1.4a6.9 6.9 0 0 0-.7 1.7l-1.7.3v2l1.7.3c.1.6.4 1.2.7 1.7l-1 1.4 1.4 1.4 1.4-1c.5.3 1.1.6 1.7.7l.3 1.7h2l.3-1.7c.6-.1 1.2-.4 1.7-.7l1.4 1 1.4-1.4-1-1.4c.3-.5.6-1.1.7-1.7l1.7-.3v-2z"/></svg>
+            </button>
+          </div>
+        </aside>
+
+        <section className="chat-list panel">
+          <div className="chat-list-top">
+            <button className="icon-btn ghost" title="Menu" onClick={() => setShowMenu(true)}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v2H4V7Zm0 5h16v2H4v-2Zm0 5h10v2H4v-2Z" /></svg>
+            </button>
+            <div className="search-wrap">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14a7 7 0 0 1 0-14Zm0 2a5 5 0 1 0 0 10a5 5 0 0 0 0-10Zm8.7 12.3l-3-3 1.4-1.4 3 3-1.4 1.4z"/></svg>
+              <input className="search-input" placeholder="Search username / id" value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={(e)=>{ if(e.key==='Enter') lookupUser() }} />
+            </div>
+            <button className="icon-btn ghost" title="Find" onClick={lookupUser}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v8m0 0v8m0-8h8m-8 0H4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
+            </button>
+          </div>
+          <div className="chat-list-header">
+            <div>
+              <div className="list-title">All chats</div>
+              <div className="list-meta">{chats.length} total</div>
+            </div>
+            <button className="pill">Archive</button>
+          </div>
+          {lookupErr && <div className="inline-error">{lookupErr}</div>}
+          <div className="chat-items">
+            {chats.map(c => {
+              const isActive = activePeer?.peerId === c.peerId
+              const title = c.title || shortId(c.peerId)
+              const lastTs = c.lastTs || 0
+              return (
+                <button key={c.peerId} onClick={()=>openChat(c.peerId)} className={`chat-item ${isActive ? 'active' : ''}`}>
+                  <div className="avatar">{(title || 'U').slice(0,1).toUpperCase()}</div>
+                  <div className="chat-item-main">
+                    <div className="chat-item-top">
+                      <div className="chat-title">{title}</div>
+                      <div className="chat-time">{formatTime(lastTs)}</div>
+                    </div>
+                    <div className="chat-preview">{c.lastText || 'No messages yet'}</div>
+                  </div>
+                </button>
+              )
+            })}
             {chats.length===0 && (
-              <div className="p-4 text-sm text-zinc-500">No chats yet. Find a user to start.</div>
+              <div className="empty-state">No chats yet. Find a user to start.</div>
             )}
           </div>
-        </div>
+        </section>
 
-        {/* Main chat */}
-        <div className="flex-1 flex flex-col bg-zinc-950">
-          <div className="h-14 border-b border-zinc-800 flex items-center px-4">
-            <div className="font-semibold">{activePeer ? (activePeer.username || activePeer.peerId) : 'Select a chat'}</div>
-            {activePeer && <div className="ml-3 text-xs text-zinc-500 font-mono">{activePeer.peerId}</div>}
-          </div>
-
-          <div className="flex-1 overflow-auto p-4 space-y-2">
-            {!activePeer && <div className="text-sm text-zinc-500">Choose a chat on the left.</div>}
-            {activePeer && messages.map((m, idx) => (
-              <div key={idx} className={`flex ${m.from===me.id?'justify-end':'justify-start'}`}>
-                <div className={`max-w-[70%] rounded-2xl px-3 py-2 text-sm border ${m.from===me.id?'bg-blue-600/20 border-blue-500/30':'bg-zinc-900 border-zinc-800'}`}>
-                  <div>{m.text}</div>
-                  <div className="text-[10px] text-zinc-400 mt-1 text-right">{new Date(m._ts||m.ts||now()).toLocaleString()}</div>
-                </div>
+        <main className="chat-main panel">
+          <div className="chat-header">
+            <div className="chat-header-left">
+              <div className={`avatar ${activePeer ? '' : 'muted'}`}>{activePeer ? activeInitial : '?'}</div>
+              <div className="chat-header-title">
+                <div className="chat-name">{activeTitle}</div>
+                {activePeer && <div className="chat-sub">{activeId}</div>}
               </div>
-            ))}
-          </div>
-
-          <div className="p-3 border-t border-zinc-800">
-            <div className="flex gap-2">
-              <input className="flex-1 px-3 py-2 rounded bg-zinc-900 border border-zinc-800 text-sm" placeholder="Message" value={sendText} onChange={e=>setSendText(e.target.value)} onKeyDown={(e)=>{ if(e.key==='Enter') sendMessage() }} disabled={!activePeer} />
-              <button className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-sm font-medium disabled:opacity-50" onClick={sendMessage} disabled={!activePeer}>Send</button>
+            </div>
+            <div className="chat-actions">
+              <button className="icon-btn" title="Search">
+                <svg viewBox="0 0 24 24"><path d="M11 4a7 7 0 1 1 0 14a7 7 0 0 1 0-14Zm0 2a5 5 0 1 0 0 10a5 5 0 0 0 0-10Zm8.7 12.3l-3-3 1.4-1.4 3 3-1.4 1.4z"/></svg>
+              </button>
+              <button className="icon-btn" title="Info" onClick={() => setShowInfo(!showInfo)}>
+                <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20a10 10 0 0 0 0-20Zm0 8a1.2 1.2 0 1 1 0-2.4A1.2 1.2 0 0 1 12 10Zm1.6 7h-3.2v-1.8h1V12h-1V10.2h3.2V17Z"/></svg>
+              </button>
             </div>
           </div>
-        </div>
+
+          <div className="messages-pane">
+            {!activePeer && <div className="empty-state">Choose a chat on the left.</div>}
+            {activePeer && messages.map((m, idx) => {
+              const mine = m.from === me.id
+              const sys = m.t === 'sys'
+              return (
+                <div key={idx} className={`msg-row ${mine ? 'out' : 'in'} ${sys ? 'sys' : ''}`}>
+                  <div className={`bubble ${mine ? 'bubble-out' : 'bubble-in'} ${sys ? 'bubble-sys' : ''}`}>
+                    <div className="bubble-text">{m.text}</div>
+                    <div className="bubble-time">{formatTime(m._ts||m.ts||now())}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="composer">
+            <div className="composer-actions">
+              <button className="icon-btn ghost" title="Attach">
+                <svg viewBox="0 0 24 24"><path d="M7 7.5V16a5 5 0 0 0 10 0V6a3.5 3.5 0 0 0-7 0v9a2 2 0 0 0 4 0V7.5h-1.8V15a.2.2 0 0 1-.4 0V6a1.7 1.7 0 1 1 3.4 0v10a3.2 3.2 0 0 1-6.4 0V7.5H7Z"/></svg>
+              </button>
+              <button className="icon-btn ghost" title="Emoji">
+                <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20a10 10 0 0 0 0-20Zm-4 8a1 1 0 1 1 2 0a1 1 0 0 1-2 0Zm7 0a1 1 0 1 1 2 0a1 1 0 0 1-2 0Zm-7.5 4.5h9a4.5 4.5 0 0 1-9 0Z"/></svg>
+              </button>
+            </div>
+            <input className="input" placeholder="Message" value={sendText} onChange={e=>setSendText(e.target.value)} onKeyDown={(e)=>{ if(e.key==='Enter') sendMessage() }} disabled={!activePeer} />
+            <button className="btn primary" onClick={sendMessage} disabled={!activePeer}>Send</button>
+          </div>
+
+          {infoTarget && (
+            <aside className={`info-drawer ${showInfo ? 'open' : ''}`}>
+              <div className="info-head">
+                <div className="info-head-main">
+                  <div className="avatar-lg">{infoTarget.name.slice(0, 1).toUpperCase()}</div>
+                  <div>
+                    <div className="info-name">{infoTarget.name}</div>
+                    <div className="info-sub">{infoTarget.role}</div>
+                  </div>
+                </div>
+                <button className="icon-btn ghost" onClick={() => setShowInfo(false)} title="Close">
+                  <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6l-12 12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
+                </button>
+              </div>
+              <div className="info-section">
+                <div className="info-row"><span>Username</span><strong>{infoTarget.name}</strong></div>
+                <div className="info-row"><span>ID</span><strong className="mono">{shortId(infoTarget.id)}</strong></div>
+                <div className="info-row"><span>Status</span><strong>Online</strong></div>
+              </div>
+              <div className="menu-divider" />
+              <div className="info-section">
+                <button className="menu-item">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5a7 7 0 1 1 0 14a7 7 0 0 1 0-14Zm0 2a5 5 0 1 0 0 10a5 5 0 0 0 0-10Z" /></svg>
+                  <span>Mute</span>
+                </button>
+                <button className="menu-item danger">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l-1 14H7L6 7Zm2-4h8l1 3H7l1-3Z" /></svg>
+                  <span>Delete chat</span>
+                </button>
+              </div>
+            </aside>
+          )}
+        </main>
       </div>
     </div>
   )

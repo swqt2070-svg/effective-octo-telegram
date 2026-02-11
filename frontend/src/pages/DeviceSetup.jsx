@@ -64,39 +64,42 @@ export default function DeviceSetup() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="app-shell">
       <TopBar />
-      <div className="max-w-4xl mx-auto p-6 space-y-4">
-        <div className="text-xl font-semibold">Device setup</div>
+      <div className="page-wrap">
+        <div className="page-title">Device setup</div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
-          <div className="text-sm text-zinc-300">Current device: <span className="font-mono">{deviceId || '(none)'}</span></div>
-          <div className="flex gap-2">
-            <input className="flex-1 px-3 py-2 rounded bg-zinc-950 border border-zinc-800" placeholder="device name" value={deviceName} onChange={e=>setDeviceName(e.target.value)} />
-            <button className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500" onClick={createDevice}>Create & init</button>
+        <div className="panel device-panel">
+          <div className="device-row">
+            <div className="device-label">Current device</div>
+            <div className="mono">{deviceId || '(none)'}</div>
           </div>
-          {status && <div className="text-sm text-zinc-300">{status}</div>}
-          {err && <div className="text-sm text-red-400">{err}</div>}
+          <div className="device-actions">
+            <input className="input" placeholder="Device name" value={deviceName} onChange={e=>setDeviceName(e.target.value)} />
+            <button className="btn primary" onClick={createDevice}>Create & init</button>
+          </div>
+          {status && <div className="device-status">{status}</div>}
+          {err && <div className="inline-error">{err}</div>}
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-          <div className="font-medium mb-2">Your devices</div>
-          <div className="space-y-2">
+        <div className="panel device-panel">
+          <div className="panel-title">Your devices</div>
+          <div className="device-list">
             {devices.map(d => (
-              <div key={d.id} className="flex items-center justify-between border border-zinc-800 rounded-lg px-3 py-2 bg-zinc-950">
+              <div key={d.id} className="device-item">
                 <div>
-                  <div className="font-medium">{d.name}</div>
-                  <div className="text-xs text-zinc-500 font-mono">{d.id}</div>
+                  <div className="device-name">{d.name}</div>
+                  <div className="mono">{d.id}</div>
                 </div>
-                <button className="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700" onClick={() => selectDevice(d.id)}>Use</button>
+                <button className="btn ghost" onClick={() => selectDevice(d.id)}>Use</button>
               </div>
             ))}
-            {devices.length === 0 && <div className="text-sm text-zinc-500">No devices yet. Create one above.</div>}
+            {devices.length === 0 && <div className="empty-state">No devices yet. Create one above.</div>}
           </div>
         </div>
 
-        <div className="text-sm text-zinc-500">
-          After selecting a device, go to <a className="text-blue-400 hover:underline" href="/chat">/chat</a>.
+        <div className="page-note">
+          Device setup is automatic now. Use this page only if you want to reset or switch devices.
         </div>
       </div>
     </div>

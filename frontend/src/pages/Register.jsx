@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { apiPost } from '../utils/api.js'
+import { apiGet, apiPost } from '../utils/api.js'
 import { useAuth } from '../state/auth.jsx'
+import { ensureDeviceSetup } from '../utils/deviceSetup.js'
 
 export default function Register() {
   const nav = useNavigate()
@@ -19,26 +20,49 @@ export default function Register() {
       const body = { username, password, displayName: displayName || undefined, inviteCode: inviteCode || undefined }
       const r = await apiPost('/auth/register', body)
       setToken(r.token)
-      nav('/device')
+      const me = await apiGet('/me', r.token)
+      await ensureDeviceSetup(r.token, me)
+      nav('/chat')
     }catch(ex){
       setErr(ex.message)
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <div className="text-xl font-semibold mb-4">Register</div>
-        <form onSubmit={onSubmit} className="space-y-3">
-          <input className="w-full px-3 py-2 rounded bg-zinc-950 border border-zinc-800" placeholder="username (a-zA-Z0-9_)" value={username} onChange={e=>setUsername(e.target.value)} />
-          <input className="w-full px-3 py-2 rounded bg-zinc-950 border border-zinc-800" placeholder="display name (optional)" value={displayName} onChange={e=>setDisplayName(e.target.value)} />
-          <input className="w-full px-3 py-2 rounded bg-zinc-950 border border-zinc-800" placeholder="password (min 8)" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
-          <input className="w-full px-3 py-2 rounded bg-zinc-950 border border-zinc-800" placeholder="invite code (required after 1st user)" value={inviteCode} onChange={e=>setInviteCode(e.target.value)} />
-          {err && <div className="text-red-400 text-sm">{err}</div>}
-          <button className="w-full py-2 rounded bg-blue-600 hover:bg-blue-500 font-medium">Create account</button>
+    <div className="auth-shell">
+      <div className="auth-card">
+        <div className="auth-head">
+          <div className="auth-title">Create account</div>
+          <div className="auth-sub">Start a secure workspace in under a minute.</div>
+        </div>
+        <form onSubmit={onSubmit} className="auth-form">
+          <label className="field">
+            <span>Username</span>
+            <input className="input" placeholder="milon356" value={username} onChange={e=>setUsername(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>Display name</span>
+            <input className="input" placeholder="Milon (optional)" value={displayName} onChange={e=>setDisplayName(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>Password</span>
+            <input className="input" placeholder="Minimum 8 characters" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>Invite code</span>
+            <input className="input" placeholder="Invite code" value={inviteCode} onChange={e=>setInviteCode(e.target.value)} />
+          </label>
+          {err && <div className="inline-error">{err}</div>}
+          <button className="btn primary full">Create account</button>
         </form>
-        <div className="mt-4 text-sm text-zinc-400">
-          <Link className="hover:underline" to="/login">Back to login</Link>
+        <div className="auth-links">
+          <Link to="/login">Back to login</Link>
+        </div>
+      </div>
+      <div className="auth-side">
+        <div className="side-blurb">
+          <div className="side-title">Private by default</div>
+          <div className="side-text">Each device generates its own keys. The server only routes encrypted envelopes.</div>
         </div>
       </div>
     </div>

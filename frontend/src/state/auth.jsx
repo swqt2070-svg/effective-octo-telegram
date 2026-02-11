@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { apiGet } from '../utils/api.js'
 import { getLocal, setLocal, delLocal } from '../utils/local.js'
+import { ensureDeviceSetup } from '../utils/deviceSetup.js'
 
 const AuthCtx = createContext(null)
 
@@ -12,6 +13,11 @@ export function AuthProvider({ children }) {
     if (!token) { setMe(null); return }
     apiGet('/me', token).then(setMe).catch(() => setMe(null))
   }, [token])
+
+  useEffect(() => {
+    if (!token || !me) return
+    ensureDeviceSetup(token, me).catch(() => {})
+  }, [token, me])
 
   const value = useMemo(() => ({
     token,

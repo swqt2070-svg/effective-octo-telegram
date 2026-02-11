@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { apiPost } from '../utils/api.js'
+import { apiGet, apiPost } from '../utils/api.js'
 import { useAuth } from '../state/auth.jsx'
+import { ensureDeviceSetup } from '../utils/deviceSetup.js'
 
 export default function Login() {
   const nav = useNavigate()
@@ -16,25 +17,42 @@ export default function Login() {
     try{
       const r = await apiPost('/auth/login', { username, password })
       setToken(r.token)
-      nav('/device')
+      const me = await apiGet('/me', r.token)
+      await ensureDeviceSetup(r.token, me)
+      nav('/chat')
     }catch(ex){
       setErr(ex.message)
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-        <div className="text-xl font-semibold mb-4">Login</div>
-        <form onSubmit={onSubmit} className="space-y-3">
-          <input className="w-full px-3 py-2 rounded bg-zinc-950 border border-zinc-800" placeholder="username" value={username} onChange={e=>setUsername(e.target.value)} />
-          <input className="w-full px-3 py-2 rounded bg-zinc-950 border border-zinc-800" placeholder="password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
-          {err && <div className="text-red-400 text-sm">{err}</div>}
-          <button className="w-full py-2 rounded bg-blue-600 hover:bg-blue-500 font-medium">Login</button>
+    <div className="auth-shell">
+      <div className="auth-card">
+        <div className="auth-head">
+          <div className="auth-title">Welcome back</div>
+          <div className="auth-sub">Sign in to continue to Local Messenger</div>
+        </div>
+        <form onSubmit={onSubmit} className="auth-form">
+          <label className="field">
+            <span>Username</span>
+            <input className="input" placeholder="milon356" value={username} onChange={e=>setUsername(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>Password</span>
+            <input className="input" placeholder="••••••••" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+          </label>
+          {err && <div className="inline-error">{err}</div>}
+          <button className="btn primary full">Login</button>
         </form>
-        <div className="mt-4 text-sm text-zinc-400 flex justify-between">
-          <Link className="hover:underline" to="/register">Register</Link>
-          <Link className="hover:underline" to="/qr">QR login</Link>
+        <div className="auth-links">
+          <Link to="/register">Create account</Link>
+          <Link to="/qr">QR login</Link>
+        </div>
+      </div>
+      <div className="auth-side">
+        <div className="side-blurb">
+          <div className="side-title">A calmer workspace</div>
+          <div className="side-text">Your conversations stay secure, fast, and focused. We handle the encryption in the background.</div>
         </div>
       </div>
     </div>
