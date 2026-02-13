@@ -1,10 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import { apiGet } from '../api'
 import { useAuth } from '../state/AuthContext'
 import { colors } from '../theme'
-import { listChats, upsertChat, ChatItem } from '../store/chatStore'
+import { listChats, upsertChat, ChatItem, appendMessage, deleteChat } from '../store/chatStore'
+import { addNotification } from '../store/notificationsStore'
+import { ensureDeviceSetup } from '../utils/deviceSetup'
+import { getActivePeer } from '../utils/session'
+import { newStoreForDevice, makeLibSignalStore, makeAddress, decryptFromAddress } from '../signal/signal'
+import { decodeCiphertext, extractBodyB64 } from '../utils/messageHelpers'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import type { ChatStackParamList } from '../navigation/AppNavigator'
 
@@ -15,6 +20,10 @@ export default function ChatListScreen({ navigation }: Props) {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
   const [chats, setChats] = useState<ChatItem[]>([])
+  const [deviceId, setDeviceId] = useState<string | null>(null)
+
+  const store = useMemo(() => (user?.id && deviceId ? newStoreForDevice(user.id, deviceId) : null), [user?.id, deviceId])
+  const lsStore = useMemo(() => (store ? makeLibSignalStore(store) : null), [store])
 
   const load = async () => {
     if (!user?.id) return
@@ -34,6 +43,13 @@ export default function ChatListScreen({ navigation }: Props) {
 
   useEffect(() => {
     if (!token || !user?.id) return
+    ensureDeviceSetup(token, user).then((id) => {
+      if (id) setDeviceId(id)
+    }).catch(() => {})
+  }, [token, user?.id])
+
+  useEffect(() => {
+    if (!token || !user?.id) return
     apiGet('/contacts/aliases', token).then(async (r) => {
       const list = r.aliases || []
       for (const a of list) {
@@ -43,6 +59,91 @@ export default function ChatListScreen({ navigation }: Props) {
     }).catch(() => {})
   }, [token, user?.id])
 
+  useEffect(() => {
+    if (!token || !user?.id) return
+    apiGet('/groups', token).then(async (r) => {
+      const list = r.groups || []
+      for (const g of list) {
+        await upsertChat(user.id, {
+          peerId: `group:${g.id}`,
+          title: g.name,
+          isGroup: true,
+          groupId: g.id,
+          lastText: '',
+          lastTs: 0,
+        })
+      }
+      await load()
+    }).catch(() => {})
+  }, [token, user?.id])
+
+  useEffect(() => {
+    let t: any
+    const poll = async () => {
+      if (!token || !deviceId || !lsStore || !user?.id) {
+        t = setTimeout(poll, 2500)
+        return
+      }
+      try {
+        const r = await apiGet(`/messages/pending?deviceId=${encodeURIComponent(deviceId)}&limit=200`, token)
+        const activePeer = await getActivePeer()
+        for (const env of r.messages || []) {
+          let peerId = env.senderUserId
+          try {
+            const packed = decodeCiphertext(env.ciphertext)
+            const bodyB64 = extractBodyB64(packed)
+            const addr = makeAddress(env.senderUserId, env.senderDeviceId)
+            const plain = await decryptFromAddress(lsStore, addr, { type: packed.type, bodyB64 })
+            if (plain?.t === 'control' && plain.action === 'delete_chat' && plain.peerId) {
+              // drop chat locally
+              // do not use server call; just clear local messages
+              await deleteChat(user.id, plain.peerId)
+              continue
+            }
+            if (plain?.groupId) {
+              peerId = `group:${plain.groupId}`
+              const preview = plain.text || (plain.t === 'file' ? (plain.file?.name || 'file') : '(msg)')
+              await upsertChat(user.id, {
+                peerId,
+                title: plain.groupName || 'Group',
+                isGroup: true,
+                groupId: plain.groupId,
+                lastText: preview,
+                lastTs: Date.parse(env.createdAt),
+              })
+            } else {
+              await upsertChat(user.id, {
+                peerId,
+                title: plain.fromUsername || peerId,
+                lastText: plain.text || '(msg)',
+                lastTs: Date.parse(env.createdAt),
+              })
+            }
+            await appendMessage(user.id, peerId, { ...plain, _ts: Date.parse(env.createdAt) })
+            if (activePeer !== peerId) {
+              await addNotification({
+                id: env.id,
+                peerId,
+                title: plain.fromUsername || peerId,
+                text: plain.text || (plain.t === 'file' ? (plain.file?.name || 'file') : 'message'),
+                ts: Date.parse(env.createdAt),
+              })
+            }
+          } catch {
+            await appendMessage(user.id, peerId, { t: 'sys', text: '[decrypt failed]', ts: Date.now() })
+          }
+        }
+        await load()
+      } catch {
+        // ignore
+      } finally {
+        t = setTimeout(poll, 2500)
+      }
+    }
+    poll()
+    return () => { if (t) clearTimeout(t) }
+  }, [token, deviceId, lsStore, user?.id])
+
   const onFind = async () => {
     if (!search.trim()) return
     try {
@@ -50,9 +151,9 @@ export default function ChatListScreen({ navigation }: Props) {
       const r = await apiGet(`/users/lookup?q=${encodeURIComponent(search.trim())}`, token || undefined)
       const u = r.user
       const title = u.username
-      await upsertChat(user!.id, { peerId: u.id, title, lastText: '', lastTs: Date.now() })
+      await upsertChat(user!.id, { peerId: u.id, title, lastText: '', lastTs: Date.now(), isGroup: false })
       await load()
-      navigation.navigate('Chat', { peerId: u.id, title })
+      navigation.navigate('Chat', { peerId: u.id, title, isGroup: false })
       setSearch('')
     } catch (e: any) {
       Alert.alert('User not found', e?.message || 'not_found')
@@ -76,6 +177,33 @@ export default function ChatListScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.quickRow}>
+        <TouchableOpacity
+          style={styles.quickBtn}
+          onPress={() => {
+            if (!user?.id) return
+            const peerId = user.id
+            const title = 'Saved messages'
+            upsertChat(user.id, { peerId, title, lastText: '', lastTs: 0 }).then(load)
+            navigation.navigate('Chat', { peerId, title, isGroup: false })
+          }}
+        >
+          <Text style={styles.quickText}>Saved</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.quickBtn}
+          onPress={() => navigation.navigate('CreateGroup')}
+        >
+          <Text style={styles.quickText}>New group</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.quickBtn}
+          onPress={() => navigation.navigate('Notifications')}
+        >
+          <Text style={styles.quickText}>Notifications</Text>
+        </TouchableOpacity>
+      </View>
+
       <FlatList
         data={chats}
         keyExtractor={(item) => item.peerId}
@@ -86,7 +214,7 @@ export default function ChatListScreen({ navigation }: Props) {
           return (
             <TouchableOpacity
               style={styles.chatItem}
-              onPress={() => navigation.navigate('Chat', { peerId: item.peerId, title })}
+              onPress={() => navigation.navigate('Chat', { peerId: item.peerId, title, isGroup: !!item.isGroup, groupId: item.groupId || undefined })}
             >
               <View style={styles.avatar}><Text style={styles.avatarText}>{title.slice(0, 1).toUpperCase()}</Text></View>
               <View style={styles.chatMain}>
@@ -122,6 +250,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   searchBtnText: { color: '#fff', fontWeight: '700' },
+  quickRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  quickBtn: {
+    flex: 1,
+    backgroundColor: colors.panelAlt,
+    borderWidth: 1,
+    borderColor: colors.stroke,
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  quickText: { color: colors.text, fontWeight: '600', fontSize: 12 },
   list: { paddingTop: 16, gap: 10 },
   chatItem: {
     flexDirection: 'row',

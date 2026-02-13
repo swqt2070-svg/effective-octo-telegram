@@ -8,6 +8,8 @@ import RegisterScreen from '../screens/RegisterScreen'
 import ChatListScreen from '../screens/ChatListScreen'
 import ChatScreen from '../screens/ChatScreen'
 import SettingsScreen from '../screens/SettingsScreen'
+import CreateGroupScreen from '../screens/CreateGroupScreen'
+import NotificationsScreen from '../screens/NotificationsScreen'
 
 export type AuthStackParamList = {
   Login: undefined
@@ -16,7 +18,9 @@ export type AuthStackParamList = {
 
 export type ChatStackParamList = {
   ChatList: undefined
-  Chat: { peerId: string; title: string }
+  Chat: { peerId: string; title: string; isGroup?: boolean; groupId?: string }
+  CreateGroup: undefined
+  Notifications: undefined
 }
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>()
@@ -28,6 +32,8 @@ function ChatStackNavigator() {
     <ChatStack.Navigator>
       <ChatStack.Screen name="ChatList" component={ChatListScreen} options={{ title: 'Chats' }} />
       <ChatStack.Screen name="Chat" component={ChatScreen} options={({ route }) => ({ title: route.params.title })} />
+      <ChatStack.Screen name="CreateGroup" component={CreateGroupScreen} options={{ title: 'New group' }} />
+      <ChatStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
     </ChatStack.Navigator>
   )
 }

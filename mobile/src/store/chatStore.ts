@@ -12,6 +12,8 @@ export type ChatItem = {
   peerId: string
   title?: string
   alias?: string | null
+  isGroup?: boolean
+  groupId?: string | null
   lastText?: string
   lastTs?: number
 }
@@ -50,4 +52,11 @@ export async function appendMessage(userId: string, peerId: string, msg: any) {
   const arr = await loadMessages(userId, peerId)
   arr.push(msg)
   await AsyncStorage.setItem(chatKey(userId, peerId), JSON.stringify(arr))
+}
+
+export async function deleteChat(userId: string, peerId: string) {
+  const idx = await listChats(userId)
+  const next = idx.filter(c => c.peerId !== peerId)
+  await AsyncStorage.setItem(chatsIndexKey(userId), JSON.stringify(next))
+  await AsyncStorage.removeItem(chatKey(userId, peerId))
 }
