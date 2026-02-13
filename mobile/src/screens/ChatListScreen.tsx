@@ -32,6 +32,17 @@ export default function ChatListScreen({ navigation }: Props) {
     load().catch(() => {})
   }, [user?.id])
 
+  useEffect(() => {
+    if (!token || !user?.id) return
+    apiGet('/contacts/aliases', token).then(async (r) => {
+      const list = r.aliases || []
+      for (const a of list) {
+        await upsertChat(user.id, { peerId: a.peerUserId, alias: a.alias })
+      }
+      await load()
+    }).catch(() => {})
+  }, [token, user?.id])
+
   const onFind = async () => {
     if (!search.trim()) return
     try {

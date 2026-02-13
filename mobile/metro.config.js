@@ -1,4 +1,5 @@
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const { withNativeFallbacks } = require('react-native-quick-crypto/metro');
 
 /**
  * Metro configuration
@@ -6,6 +7,16 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
  *
  * @type {import('@react-native/metro-config').MetroConfig}
  */
-const config = {};
+const defaultConfig = getDefaultConfig(__dirname);
+const config = {
+  resolver: {
+    extraNodeModules: {
+      crypto: require.resolve('react-native-quick-crypto'),
+      stream: require.resolve('stream-browserify'),
+      buffer: require.resolve('buffer'),
+      process: require.resolve('process'),
+    },
+  },
+};
 
-module.exports = mergeConfig(getDefaultConfig(__dirname), config);
+module.exports = mergeConfig(withNativeFallbacks(defaultConfig), config);
