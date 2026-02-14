@@ -11,6 +11,8 @@ import crypto from 'react-native-quick-crypto';
 
 global.Buffer = Buffer;
 global.crypto = crypto;
+global.window = global.window || global;
+global.navigator = global.navigator || { userAgent: 'react-native' };
 global.atob = global.atob || atob;
 global.btoa = global.btoa || btoa;
 const processShim = global.process || require('process');
