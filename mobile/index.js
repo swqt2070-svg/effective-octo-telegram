@@ -17,6 +17,8 @@ const processShim = global.process || require('process');
 processShim.env = processShim.env || {};
 processShim.argv = processShim.argv || [];
 processShim.platform = processShim.platform || 'android';
+processShim.stdout = processShim.stdout || { write: () => {} };
+processShim.stderr = processShim.stderr || { write: () => {} };
 processShim.on = processShim.on || (() => processShim);
 processShim.addListener = processShim.addListener || processShim.on;
 processShim.removeListener = processShim.removeListener || (() => processShim);
