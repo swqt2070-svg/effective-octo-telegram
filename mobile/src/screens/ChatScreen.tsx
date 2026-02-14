@@ -64,6 +64,11 @@ export default function ChatScreen({ navigation, route }: Props) {
     console.warn('send error', err)
   }
 
+  const isIllegalBuffer = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err)
+    return String(msg || '').toLowerCase().includes('illegal buffer')
+  }
+
   const store = useMemo(() => (user?.id && deviceId ? newStoreForDevice(user.id, deviceId) : null), [user?.id, deviceId])
   const lsStore = useMemo(() => (store ? makeLibSignalStore(store) : null), [store])
 
@@ -243,6 +248,13 @@ export default function ChatScreen({ navigation, route }: Props) {
     return { deviceId: id, lsStore: storeForSend }
   }
 
+  async function resetSignalState() {
+    if (!user?.id || !deviceId) return
+    const s = newStoreForDevice(user.id, deviceId)
+    await s.clearAll()
+    setDeviceId(null)
+  }
+
   const send = async () => {
     if (!text.trim()) return
     const ctx = await getReadyContext()
@@ -264,21 +276,49 @@ export default function ChatScreen({ navigation, route }: Props) {
     setText('')
     setReplyTo(null)
 
+    const sendRemote = async (ctx2: { deviceId: string; lsStore: any }) => {
+      if (isGroup && groupId) {
+        await sendGroupMessage(payload, `[group] ${payload.text}`, ctx2)
+        return
+      }
+      const exclude = peerId === user.id ? [ctx2.deviceId] : []
+      const envelopes = await buildEnvelopes(peerId, payload, exclude, ctx2.lsStore)
+      if (envelopes.length) {
+        await apiPost('/messages/send', { senderDeviceId: ctx2.deviceId, recipientUserId: peerId, envelopes }, token)
+      }
+    }
+
     if (isGroup && groupId) {
       try {
-        await sendGroupMessage(payload, `[group] ${payload.text}`, ctx)
+        await sendRemote(ctx)
       } catch (err) {
+        if (isIllegalBuffer(err)) {
+          try {
+            await resetSignalState()
+            const ctx2 = await getReadyContext()
+            if (ctx2) {
+              await sendRemote(ctx2)
+              return
+            }
+          } catch {}
+        }
         reportSendError(err)
       }
     } else {
       await sendPayload(peerId, payload, payload.text)
       try {
-        const exclude = peerId === user.id ? [ctx.deviceId] : []
-        const envelopes = await buildEnvelopes(peerId, payload, exclude, ctx.lsStore)
-        if (envelopes.length) {
-          await apiPost('/messages/send', { senderDeviceId: ctx.deviceId, recipientUserId: peerId, envelopes }, token)
-        }
+        await sendRemote(ctx)
       } catch (err) {
+        if (isIllegalBuffer(err)) {
+          try {
+            await resetSignalState()
+            const ctx2 = await getReadyContext()
+            if (ctx2) {
+              await sendRemote(ctx2)
+              return
+            }
+          } catch {}
+        }
         reportSendError(err)
       }
     }

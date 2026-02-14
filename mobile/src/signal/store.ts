@@ -89,4 +89,12 @@ export class SignalStore {
   async remove(key: string) {
     await AsyncStorage.removeItem(this.k(key))
   }
+
+  async clearAll() {
+    const keys = await AsyncStorage.getAllKeys()
+    const mine = keys.filter((k) => k.startsWith(this.prefix))
+    if (mine.length) {
+      await AsyncStorage.multiRemove(mine)
+    }
+  }
 }
