@@ -119,12 +119,19 @@ export async function ensureLocalIdentity(store: SignalStore) {
   let identityKey = await store.get('identityKey')
   let registrationId = await store.get('registrationId')
 
-  if (!identityKey) {
+  const hasValidIdentity =
+    identityKey &&
+    identityKey.pubKey instanceof ArrayBuffer &&
+    identityKey.privKey instanceof ArrayBuffer &&
+    identityKey.pubKey.byteLength === 33 &&
+    identityKey.privKey.byteLength === 32
+
+  if (!hasValidIdentity) {
     const pair = await (libsignal as any).KeyHelper.generateIdentityKeyPair()
     identityKey = { pubKey: pair.pubKey, privKey: pair.privKey }
     await store.put('identityKey', identityKey)
   }
-  if (!registrationId) {
+  if (typeof registrationId !== 'number') {
     registrationId = await (libsignal as any).KeyHelper.generateRegistrationId()
     await store.put('registrationId', registrationId)
   }
