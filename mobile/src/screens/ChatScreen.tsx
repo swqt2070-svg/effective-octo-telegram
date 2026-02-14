@@ -57,6 +57,12 @@ export default function ChatScreen({ navigation, route }: Props) {
   const fileCacheRef = useRef(new Map<string, string>())
   const listRef = useRef<FlatList>(null)
 
+  const reportSendError = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err)
+    Alert.alert('Send failed', msg || 'Unknown error')
+    console.warn('send error', err)
+  }
+
   const store = useMemo(() => (user?.id && deviceId ? newStoreForDevice(user.id, deviceId) : null), [user?.id, deviceId])
   const lsStore = useMemo(() => (store ? makeLibSignalStore(store) : null), [store])
 
@@ -201,7 +207,11 @@ export default function ChatScreen({ navigation, route }: Props) {
   }
 
   const send = async () => {
-    if (!text.trim() || !user?.id || !token || !deviceId || !lsStore) return
+    if (!text.trim()) return
+    if (!user?.id || !token || !deviceId || !lsStore) {
+      Alert.alert('Not ready', 'Device setup is still in progress. Try again in a moment.')
+      return
+    }
     const ts = Date.now()
     const payload: any = { t: isGroup ? 'group' : 'msg', text: text.trim(), from: user.id, fromUsername: user.username, ts }
     if (isGroup) {
@@ -213,7 +223,11 @@ export default function ChatScreen({ navigation, route }: Props) {
     setReplyTo(null)
 
     if (isGroup && groupId) {
-      await sendGroupMessage(payload, `[group] ${payload.text}`)
+      try {
+        await sendGroupMessage(payload, `[group] ${payload.text}`)
+      } catch (err) {
+        reportSendError(err)
+      }
     } else {
       await sendPayload(peerId, payload, payload.text)
       try {
@@ -222,7 +236,9 @@ export default function ChatScreen({ navigation, route }: Props) {
         if (envelopes.length) {
           await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: peerId, envelopes }, token)
         }
-      } catch {}
+      } catch (err) {
+        reportSendError(err)
+      }
     }
   }
 
@@ -240,10 +256,14 @@ export default function ChatScreen({ navigation, route }: Props) {
           if (envelopes.length) {
             await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: u.id, envelopes }, token)
           }
-        } catch {}
+        } catch (err) {
+          reportSendError(err)
+        }
       }
       await sendControl(user.id, payload, [deviceId])
-    } catch {}
+    } catch (err) {
+      reportSendError(err)
+    }
   }
 
   async function pickFiles() {
@@ -317,11 +337,15 @@ export default function ChatScreen({ navigation, route }: Props) {
           const users = members.members || []
           for (const u of users) {
             if (u.id === user.id) continue
-            const r = await uploadFor(u.id)
-            const payload = { ...basePayload, groupId, groupName: title, file: { ...basePayload.file, id: r.file.id } }
-            const envelopes = await buildEnvelopes(u.id, payload)
-            if (envelopes.length) {
-              await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: u.id, envelopes }, token)
+            try {
+              const r = await uploadFor(u.id)
+              const payload = { ...basePayload, groupId, groupName: title, file: { ...basePayload.file, id: r.file.id } }
+              const envelopes = await buildEnvelopes(u.id, payload)
+              if (envelopes.length) {
+                await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: u.id, envelopes }, token)
+              }
+            } catch (err) {
+              reportSendError(err)
             }
           }
         } else {
@@ -329,12 +353,18 @@ export default function ChatScreen({ navigation, route }: Props) {
           const payload = { ...basePayload, file: { ...basePayload.file, id: r.file.id } }
           await sendPayload(peerId, payload, `[file] ${payload.file.name}`)
           const exclude = peerId === user.id ? [deviceId] : []
-          const envelopes = await buildEnvelopes(peerId, payload, exclude)
-          if (envelopes.length) {
-            await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: peerId, envelopes }, token)
+          try {
+            const envelopes = await buildEnvelopes(peerId, payload, exclude)
+            if (envelopes.length) {
+              await apiPost('/messages/send', { senderDeviceId: deviceId, recipientUserId: peerId, envelopes }, token)
+            }
+          } catch (err) {
+            reportSendError(err)
           }
         }
       }
+    } catch (err) {
+      reportSendError(err)
     } finally {
       setFileBusy(false)
       setReplyTo(null)
