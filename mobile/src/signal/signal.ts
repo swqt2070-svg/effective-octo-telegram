@@ -6,6 +6,28 @@ if (!(globalThis as any).libsignal) {
   require('libsignal-protocol')
 }
 const libsignal: any = (globalThis as any).libsignal
+const ByteBuffer: any = (globalThis as any).dcodeIO?.ByteBuffer
+
+if (ByteBuffer && !ByteBuffer.__patchedWrap) {
+  const origWrap = ByteBuffer.wrap.bind(ByteBuffer)
+  ByteBuffer.wrap = function wrapPatched(buffer: any, encoding?: any, littleEndian?: any, noAssert?: any) {
+    let buf = buffer
+    if (buf && buf.type === 'Buffer' && Array.isArray(buf.data)) {
+      buf = new Uint8Array(buf.data)
+    } else if (buf && Array.isArray(buf.data) && typeof buf.byteLength === 'number') {
+      buf = new Uint8Array(buf.data)
+    } else if (buf && buf.buffer && typeof buf.byteLength === 'number') {
+      try {
+        const offset = typeof buf.byteOffset === 'number' ? buf.byteOffset : 0
+        buf = new Uint8Array(buf.buffer, offset, buf.byteLength)
+      } catch {
+        // fall through to original wrap
+      }
+    }
+    return origWrap(buf, encoding, littleEndian, noAssert)
+  }
+  ByteBuffer.__patchedWrap = true
+}
 
 // libsignal expects storage.Direction.*; harden for RN bundles
 const Direction = { SENDING: 1, RECEIVING: 2 }
@@ -79,6 +101,21 @@ function b64FromView(view: ArrayBufferView) {
   return b64FromArrayBuffer(slice)
 }
 
+function toArrayBufferLike(value: any): ArrayBuffer | Uint8Array {
+  if (!value) throw new Error('invalid buffer')
+  if (value instanceof ArrayBuffer) return value
+  if (ArrayBuffer.isView(value)) {
+    const v = value as ArrayBufferView
+    return v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength)
+  }
+  if (value?.type === 'Buffer' && Array.isArray(value.data)) return new Uint8Array(value.data)
+  if (value?.data && Array.isArray(value.data)) return new Uint8Array(value.data)
+  if (typeof value === 'string') {
+    return arrayBufferFromB64(value)
+  }
+  throw new Error('illegal buffer')
+}
+
 function normalizeB64(s: string) {
   if (!s) throw new Error('empty b64')
   const cleaned = String(s)
@@ -133,7 +170,13 @@ export async function ensureLocalIdentity(store: SignalStore) {
 
   if (!hasValidIdentity) {
     const pair = await (libsignal as any).KeyHelper.generateIdentityKeyPair()
-    identityKey = { pubKey: pair.pubKey, privKey: pair.privKey }
+    identityKey = { pubKey: toArrayBufferLike(pair.pubKey), privKey: toArrayBufferLike(pair.privKey) }
+    await store.put('identityKey', identityKey)
+  } else if (identityKey) {
+    identityKey = {
+      pubKey: toArrayBufferLike(identityKey.pubKey),
+      privKey: toArrayBufferLike(identityKey.privKey),
+    }
     await store.put('identityKey', identityKey)
   }
   if (typeof registrationId !== 'number') {
@@ -148,8 +191,9 @@ export async function generatePreKeys(store: SignalStore, startId = 1, count = 5
   for (let i = 0; i < count; i++) {
     const id = startId + i
     const kp = await (libsignal as any).KeyHelper.generatePreKey(id)
-    preKeys.push({ id: kp.keyId, keyPair: kp.keyPair })
-    await store.put('preKey' + id, kp.keyPair)
+    const keyPair = { pubKey: toArrayBufferLike(kp.keyPair.pubKey), privKey: toArrayBufferLike(kp.keyPair.privKey) }
+    preKeys.push({ id: kp.keyId, keyPair })
+    await store.put('preKey' + id, keyPair)
   }
   await store.put('preKeyIdCounter', startId + count)
   return preKeys
@@ -158,15 +202,20 @@ export async function generatePreKeys(store: SignalStore, startId = 1, count = 5
 export async function generateSignedPreKey(store: SignalStore, id = 1) {
   const identityKey = await store.get('identityKey')
   const signed = await (libsignal as any).KeyHelper.generateSignedPreKey(identityKey, id)
-  await store.put('signedPreKey' + id, signed.keyPair)
+  const keyPair = { pubKey: toArrayBufferLike(signed.keyPair.pubKey), privKey: toArrayBufferLike(signed.keyPair.privKey) }
+  await store.put('signedPreKey' + id, keyPair)
   await store.put('signedPreKeyId', id)
-  return { id: signed.keyId, keyPair: signed.keyPair, signature: signed.signature }
+  return { id: signed.keyId, keyPair, signature: signed.signature }
 }
 
 export function makeLibSignalStore(store: SignalStore) {
   return {
     Direction,
-    getIdentityKeyPair: async () => store.get('identityKey'),
+    getIdentityKeyPair: async () => {
+      const pair = await store.get('identityKey')
+      if (!pair) return pair
+      return { pubKey: toArrayBufferLike(pair.pubKey), privKey: toArrayBufferLike(pair.privKey) }
+    },
     getLocalRegistrationId: async () => store.get('registrationId'),
     put: async (key: string, value: any) => store.put(key, value),
     get: async (key: string, defaultValue: any) => {
@@ -176,18 +225,34 @@ export function makeLibSignalStore(store: SignalStore) {
     remove: async (key: string) => store.remove(key),
 
     isTrustedIdentity: async () => true,
-    loadIdentityKey: async (identifier: string) => store.get('identityKey:' + identifier),
+    loadIdentityKey: async (identifier: string) => {
+      const v = await store.get('identityKey:' + identifier)
+      return v ? toArrayBufferLike(v) : v
+    },
     saveIdentity: async (identifier: string, identityKey: any) => {
-      await store.put('identityKey:' + identifier, identityKey)
+      const key = toArrayBufferLike(identityKey)
+      await store.put('identityKey:' + identifier, key)
       return true
     },
 
-    loadPreKey: async (keyId: number) => store.get('preKey' + keyId),
-    storePreKey: async (keyId: number, keyPair: any) => store.put('preKey' + keyId, keyPair),
+    loadPreKey: async (keyId: number) => {
+      const kp = await store.get('preKey' + keyId)
+      return kp ? { pubKey: toArrayBufferLike(kp.pubKey), privKey: toArrayBufferLike(kp.privKey) } : kp
+    },
+    storePreKey: async (keyId: number, keyPair: any) => {
+      const kp = { pubKey: toArrayBufferLike(keyPair.pubKey), privKey: toArrayBufferLike(keyPair.privKey) }
+      return store.put('preKey' + keyId, kp)
+    },
     removePreKey: async (keyId: number) => store.remove('preKey' + keyId),
 
-    loadSignedPreKey: async (keyId: number) => store.get('signedPreKey' + keyId),
-    storeSignedPreKey: async (keyId: number, keyPair: any) => store.put('signedPreKey' + keyId, keyPair),
+    loadSignedPreKey: async (keyId: number) => {
+      const kp = await store.get('signedPreKey' + keyId)
+      return kp ? { pubKey: toArrayBufferLike(kp.pubKey), privKey: toArrayBufferLike(kp.privKey) } : kp
+    },
+    storeSignedPreKey: async (keyId: number, keyPair: any) => {
+      const kp = { pubKey: toArrayBufferLike(keyPair.pubKey), privKey: toArrayBufferLike(keyPair.privKey) }
+      return store.put('signedPreKey' + keyId, kp)
+    },
     removeSignedPreKey: async (keyId: number) => store.remove('signedPreKey' + keyId),
 
     loadSession: async (identifier: string) => store.get('session:' + identifier),
