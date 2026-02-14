@@ -1,5 +1,4 @@
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
-const { withNativeFallbacks } = require('react-native-quick-crypto/metro');
 
 /**
  * Metro configuration
@@ -12,6 +11,10 @@ const config = {
   resolver: {
     extraNodeModules: {
       crypto: require.resolve('react-native-quick-crypto'),
+      fs: require.resolve('./src/shims/fs'),
+      'libsignal-protocol': require.resolve('libsignal-protocol/dist/libsignal-protocol.js'),
+      'mocha-bytebuffer': require.resolve('bytebuffer'),
+      path: require.resolve('path-browserify'),
       stream: require.resolve('stream-browserify'),
       buffer: require.resolve('buffer'),
       process: require.resolve('process'),
@@ -19,4 +22,4 @@ const config = {
   },
 };
 
-module.exports = mergeConfig(withNativeFallbacks(defaultConfig), config);
+module.exports = mergeConfig(defaultConfig, config);

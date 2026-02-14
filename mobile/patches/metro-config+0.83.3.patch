@@ -1,0 +1,21 @@
+diff --git a/node_modules/metro-config/src/loadConfig.js b/node_modules/metro-config/src/loadConfig.js
+index 7ac9d88..07e1bfa 100644
+--- a/node_modules/metro-config/src/loadConfig.js
++++ b/node_modules/metro-config/src/loadConfig.js
+@@ -14,6 +14,7 @@ var _jestValidate = require("jest-validate");
+ var MetroCache = _interopRequireWildcard(require("metro-cache"));
+ var _os = require("os");
+ var path = _interopRequireWildcard(require("path"));
++var _url = require("url");
+ var _yaml = require("yaml");
+ function _getRequireWildcardCache(e) {
+   if ("function" != typeof WeakMap) return null;
+@@ -289,7 +290,7 @@ async function loadConfigFile(absolutePath) {
+       }
+     } catch (e) {
+       try {
+-        const configModule = await import(absolutePath);
++        const configModule = await import((0, _url.pathToFileURL)(absolutePath).href);
+         config = await configModule.default;
+       } catch (error) {
+         let prefix = `Error loading Metro config at: ${absolutePath}\n`;
