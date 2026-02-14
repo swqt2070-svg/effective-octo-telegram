@@ -16,6 +16,7 @@ global.btoa = global.btoa || btoa;
 const processShim = global.process || require('process');
 processShim.env = processShim.env || {};
 processShim.argv = processShim.argv || [];
+processShim.platform = processShim.platform || 'android';
 processShim.on = processShim.on || (() => processShim);
 processShim.addListener = processShim.addListener || processShim.on;
 processShim.removeListener = processShim.removeListener || (() => processShim);
