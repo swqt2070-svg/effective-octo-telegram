@@ -1,10 +1,9 @@
-import * as libsignal from 'libsignal-protocol'
 import { SignalStore } from './store'
 
 // Ensure libsignal is available in RN bundle
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const libsignal = require('libsignal-protocol') as any
-;(globalThis as any).libsignal = (globalThis as any).libsignal || libsignal
+const libsignal: any = (globalThis as any).libsignal || require('libsignal-protocol')
+;(globalThis as any).libsignal = libsignal
 
 // libsignal expects storage.Direction.*; harden for RN bundles
 const Direction = { SENDING: 1, RECEIVING: 2 }
