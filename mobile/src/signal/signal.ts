@@ -74,6 +74,11 @@ function b64FromArrayBuffer(buf: ArrayBuffer) {
   return Buffer.from(new Uint8Array(buf)).toString('base64')
 }
 
+function b64FromView(view: ArrayBufferView) {
+  const slice = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+  return b64FromArrayBuffer(slice)
+}
+
 function normalizeB64(s: string) {
   if (!s) throw new Error('empty b64')
   const cleaned = String(s)
@@ -237,10 +242,13 @@ export async function encryptToAddress(lsStore: any, address: any, plaintextObj:
     bodyB64 = Buffer.from(msg.body, 'binary').toString('base64')
   } else if (msg.body instanceof ArrayBuffer) {
     bodyB64 = b64FromArrayBuffer(msg.body)
+  } else if (ArrayBuffer.isView(msg.body)) {
+    bodyB64 = b64FromView(msg.body)
   } else if (msg.body?.toArrayBuffer) {
     bodyB64 = b64FromArrayBuffer(msg.body.toArrayBuffer())
   } else if (msg.body?.buffer instanceof ArrayBuffer) {
-    bodyB64 = b64FromArrayBuffer(msg.body.buffer)
+    const view = msg.body as ArrayBufferView
+    bodyB64 = ArrayBuffer.isView(view) ? b64FromView(view) : b64FromArrayBuffer(msg.body.buffer)
   } else {
     throw new Error('Unsupported message body type')
   }
