@@ -44,6 +44,7 @@ export default function ChatScreen({ navigation, route }: Props) {
   const [messages, setMessages] = useState<any[]>([])
   const [text, setText] = useState('')
   const [deviceId, setDeviceId] = useState<string | null>(null)
+  const [deviceError, setDeviceError] = useState<string | null>(null)
   const [replyTo, setReplyTo] = useState<any | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -88,7 +89,11 @@ export default function ChatScreen({ navigation, route }: Props) {
     if (!token || !user?.id) return
     ensureDeviceSetup(token, user).then((id) => {
       if (id) setDeviceId(id)
-    }).catch(() => {})
+    }).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      setDeviceError(msg || 'device_setup_failed')
+      Alert.alert('Device setup failed', msg || 'Unknown error')
+    })
   }, [token, user?.id])
 
   useEffect(() => {
@@ -209,7 +214,10 @@ export default function ChatScreen({ navigation, route }: Props) {
   const send = async () => {
     if (!text.trim()) return
     if (!user?.id || !token || !deviceId || !lsStore) {
-      Alert.alert('Not ready', 'Device setup is still in progress. Try again in a moment.')
+      const msg = deviceError
+        ? `Device setup failed: ${deviceError}`
+        : 'Device setup is still in progress. Try again in a moment.'
+      Alert.alert('Not ready', msg)
       return
     }
     const ts = Date.now()

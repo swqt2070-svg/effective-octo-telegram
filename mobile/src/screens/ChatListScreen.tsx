@@ -21,6 +21,7 @@ export default function ChatListScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false)
   const [chats, setChats] = useState<ChatItem[]>([])
   const [deviceId, setDeviceId] = useState<string | null>(null)
+  const [deviceError, setDeviceError] = useState<string | null>(null)
 
   const store = useMemo(() => (user?.id && deviceId ? newStoreForDevice(user.id, deviceId) : null), [user?.id, deviceId])
   const lsStore = useMemo(() => (store ? makeLibSignalStore(store) : null), [store])
@@ -45,7 +46,13 @@ export default function ChatListScreen({ navigation }: Props) {
     if (!token || !user?.id) return
     ensureDeviceSetup(token, user).then((id) => {
       if (id) setDeviceId(id)
-    }).catch(() => {})
+    }).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!deviceError) {
+        setDeviceError(msg || 'device_setup_failed')
+        Alert.alert('Device setup failed', msg || 'Unknown error')
+      }
+    })
   }, [token, user?.id])
 
   useEffect(() => {
