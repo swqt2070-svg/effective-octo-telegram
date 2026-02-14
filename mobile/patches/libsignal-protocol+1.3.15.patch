@@ -1,0 +1,22 @@
+diff --git a/node_modules/libsignal-protocol/dist/libsignal-protocol.js b/node_modules/libsignal-protocol/dist/libsignal-protocol.js
+index bed73f0..3fe2771 100644
+--- a/node_modules/libsignal-protocol/dist/libsignal-protocol.js
++++ b/node_modules/libsignal-protocol/dist/libsignal-protocol.js
+@@ -504,7 +504,16 @@ var cwrap, ccall;
+   var sourceRegex = /^function\s*\(([^)]*)\)\s*{\s*([^*]*?)[\s;]*(?:return\s*(.*?)[;\s]*)?}$/;
+   function parseJSFunc(jsfunc) {
+     // Match the body and the return value of a javascript function source
+-    var parsed = jsfunc.toString().match(sourceRegex).slice(1);
++    var src = jsfunc.toString();
++    var match = src.match(sourceRegex);
++    if (!match) {
++      var start = src.indexOf('{');
++      var end = src.lastIndexOf('}');
++      var body = (start !== -1 && end !== -1 && end > start) ? src.slice(start + 1, end).trim() : '';
++      var retMatch = body.match(/return\s+([^;]+);?/);
++      return {arguments : '', body : body, returnValue: retMatch ? retMatch[1] : ''}
++    }
++    var parsed = match.slice(1);
+     return {arguments : parsed[0], body : parsed[1], returnValue: parsed[2]}
+   }
+   var JSsource = {};
